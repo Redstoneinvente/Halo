@@ -431,6 +431,12 @@ struct ClosedNotchSlot: View {
     private var itemIconSize: Double {
         min(max(8, itemStyle.iconSize ?? textSize), max(8, innerHeight))
     }
+    private var itemIconPadding: Double {
+        itemStyle.resolvedIconStyle == .plain ? 0 : itemStyle.resolvedIconPadding
+    }
+    private var itemIconFootprint: Double {
+        max(12, itemIconSize + 2 + itemIconPadding * 2)
+    }
     private var itemTextColor: Color {
         itemStyle.textColor?.color ?? effectiveTextColor
     }
@@ -688,62 +694,40 @@ struct ClosedNotchSlot: View {
             EmptyView()
 
         case .clock:
-            switch itemStyle.layout {
-            case .iconOnly:
-                itemIcon("clock")
-            case .iconAndText:
-                HStack(spacing: itemSpacing) {
-                    itemIcon("clock")
-                    WidgetClock(style: compactClock, compact: true)
-                }
-            case .automatic, .textOnly:
+            arrangedWidget(symbol: "clock", automaticShowsIcon: false) {
                 WidgetClock(style: compactClock, compact: true)
             }
 
         case .date:
             TimelineView(.periodic(from: .now, by: 60)) { context in
-                compactLabel(
-                    symbol: "calendar",
-                    text: itemStyle.dateStyle.formatted(context.date),
-                    automaticShowsIcon: false
-                )
+                arrangedWidget(symbol: "calendar", automaticShowsIcon: false) {
+                    Text(itemStyle.dateStyle.formatted(context.date)).lineLimit(1)
+                }
             }
 
         case .timer:
             if let deadline = store.deadline {
-                switch itemStyle.layout {
-                case .iconOnly:
-                    itemIcon("timer")
-                case .iconAndText:
-                    HStack(spacing: itemSpacing) {
-                        itemIcon("timer")
-                        Text(deadline, style: .timer).monospacedDigit().lineLimit(1)
-                    }
-                case .automatic, .textOnly:
+                arrangedWidget(symbol: "timer", automaticShowsIcon: false) {
                     Text(deadline, style: .timer).monospacedDigit().lineLimit(1)
                 }
             } else {
-                compactLabel(
-                    symbol: "timer",
-                    text: store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready",
-                    automaticShowsIcon: true
-                )
+                arrangedWidget(symbol: "timer", automaticShowsIcon: true) {
+                    Text(store.pausedSeconds > 0 ? "Paused" : store.finished ? "Done" : "Ready")
+                        .lineLimit(1)
+                }
             }
 
         case .battery:
             if let battery = system.battery {
-                compactLabel(
+                arrangedWidget(
                     symbol: system.charging ? "battery.100.bolt" : "battery.100",
-                    text: "\(battery)%",
-                    monospaced: true,
                     automaticShowsIcon: true
-                )
+                ) {
+                    Text("\(battery)%").monospacedDigit().lineLimit(1)
+                }
             } else {
-                switch itemStyle.layout {
-                case .textOnly:
+                arrangedWidget(symbol: "powerplug", automaticShowsIcon: true) {
                     Text("Power").lineLimit(1)
-                default:
-                    itemIcon("powerplug")
                 }
             }
 
@@ -788,12 +772,9 @@ struct ClosedNotchSlot: View {
                 .layoutPriority(0)
 
         case .files:
-            compactLabel(
-                symbol: "tray",
-                text: "\(store.files.count)",
-                monospaced: true,
-                automaticShowsIcon: true
-            )
+            arrangedWidget(symbol: "tray", automaticShowsIcon: true) {
+                Text("\(store.files.count)").monospacedDigit().lineLimit(1)
+            }
 
         case .activity:
             if let activity = activeActivity {
@@ -816,45 +797,106 @@ struct ClosedNotchSlot: View {
 
     @ViewBuilder
     private func itemIcon(_ symbol: String) -> some View {
-        Image(systemName: symbol)
+        let resolvedSymbol = itemStyle.iconSymbol ?? symbol
+        let backgroundColor = itemStyle.iconBackgroundColor?.color ?? itemIconColor
+        let glyph = Image(systemName: resolvedSymbol)
             .font(.system(size: itemIconSize, weight: itemFontWeight))
             .foregroundStyle(itemIconColor)
-            .frame(width: max(12, itemIconSize + 2), alignment: .center)
-    }
 
-    @ViewBuilder
-    private func compactText(_ text: String, monospaced: Bool) -> some View {
-        if monospaced {
-            Text(text).monospacedDigit().lineLimit(1)
-        } else {
-            Text(text).lineLimit(1)
+        switch itemStyle.resolvedIconStyle {
+        case .plain:
+            glyph
+                .frame(width: itemIconFootprint, alignment: .center)
+
+        case .circle:
+            glyph
+                .padding(itemIconPadding)
+                .background(backgroundColor.opacity(itemStyle.resolvedIconBackgroundOpacity), in: Circle())
+
+        case .roundedSquare:
+            glyph
+                .padding(itemIconPadding)
+                .background(
+                    backgroundColor.opacity(itemStyle.resolvedIconBackgroundOpacity),
+                    in: RoundedRectangle(cornerRadius: max(4, itemIconPadding + 3), style: .continuous)
+                )
+
+        case .capsule:
+            glyph
+                .padding(.horizontal, itemIconPadding + 2)
+                .padding(.vertical, itemIconPadding)
+                .background(backgroundColor.opacity(itemStyle.resolvedIconBackgroundOpacity), in: Capsule())
+
+        case .glassCircle:
+            glyph
+                .padding(itemIconPadding)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().stroke(backgroundColor.opacity(0.20), lineWidth: 0.7))
+
+        case .glassRounded:
+            let shape = RoundedRectangle(cornerRadius: max(4, itemIconPadding + 3), style: .continuous)
+            glyph
+                .padding(itemIconPadding)
+                .background(.ultraThinMaterial, in: shape)
+                .overlay(shape.stroke(backgroundColor.opacity(0.20), lineWidth: 0.7))
+
+        case .outlineCircle:
+            glyph
+                .padding(itemIconPadding)
+                .overlay(Circle().stroke(backgroundColor.opacity(max(0.28, itemStyle.resolvedIconBackgroundOpacity)), lineWidth: 1))
+
+        case .outlineRounded:
+            let shape = RoundedRectangle(cornerRadius: max(4, itemIconPadding + 3), style: .continuous)
+            glyph
+                .padding(itemIconPadding)
+                .overlay(shape.stroke(backgroundColor.opacity(max(0.28, itemStyle.resolvedIconBackgroundOpacity)), lineWidth: 1))
         }
     }
 
     @ViewBuilder
-    private func compactLabel(
+    private func arrangedWidget<Content: View>(
         symbol: String,
-        text: String,
-        monospaced: Bool = false,
-        automaticShowsIcon: Bool = true
+        automaticShowsIcon: Bool,
+        @ViewBuilder content: () -> Content
     ) -> some View {
         switch itemStyle.layout {
         case .automatic:
             if automaticShowsIcon {
                 HStack(spacing: itemSpacing) {
                     itemIcon(symbol)
-                    compactText(text, monospaced: monospaced)
+                    content()
                 }
             } else {
-                compactText(text, monospaced: monospaced)
+                content()
             }
+
         case .iconAndText:
             HStack(spacing: itemSpacing) {
                 itemIcon(symbol)
-                compactText(text, monospaced: monospaced)
+                content()
             }
+
+        case .textAndIcon:
+            HStack(spacing: itemSpacing) {
+                content()
+                itemIcon(symbol)
+            }
+
+        case .stacked:
+            VStack(spacing: max(1, itemSpacing * 0.55)) {
+                itemIcon(symbol)
+                content()
+            }
+
+        case .stackedReversed:
+            VStack(spacing: max(1, itemSpacing * 0.55)) {
+                content()
+                itemIcon(symbol)
+            }
+
         case .textOnly:
-            compactText(text, monospaced: monospaced)
+            content()
+
         case .iconOnly:
             itemIcon(symbol)
         }
@@ -871,11 +913,7 @@ struct ClosedNotchSlot: View {
         case .textOnly:
             VStack(alignment: alignment, spacing: 1) {
                 activityText(activity)
-                if itemStyle.showProgress, let progress = activity.progress {
-                    ProgressView(value: progress)
-                        .controlSize(.mini)
-                        .frame(width: min(60, max(28, activityContentWidth * 0.42)))
-                }
+                activityProgress(activity, wide: true)
             }
             .frame(width: activityContentWidth, alignment: side == .left ? .trailing : .leading)
 
@@ -883,13 +921,43 @@ struct ClosedNotchSlot: View {
             HStack(spacing: itemSpacing) {
                 activityIcon(activity)
                 activityText(activity)
-                if itemStyle.showProgress, let progress = activity.progress {
-                    ProgressView(value: progress)
-                        .controlSize(.mini)
-                        .frame(width: min(38, max(24, activityContentWidth * 0.22)))
-                }
+                activityProgress(activity, wide: false)
             }
             .frame(width: activityContentWidth, alignment: side == .left ? .trailing : .leading)
+
+        case .textAndIcon:
+            HStack(spacing: itemSpacing) {
+                activityText(activity)
+                activityProgress(activity, wide: false)
+                activityIcon(activity)
+            }
+            .frame(width: activityContentWidth, alignment: side == .left ? .trailing : .leading)
+
+        case .stacked:
+            VStack(alignment: alignment, spacing: max(1, itemSpacing * 0.55)) {
+                activityIcon(activity)
+                activityText(activity)
+                activityProgress(activity, wide: true)
+            }
+            .frame(width: activityContentWidth, alignment: side == .left ? .trailing : .leading)
+
+        case .stackedReversed:
+            VStack(alignment: alignment, spacing: max(1, itemSpacing * 0.55)) {
+                activityText(activity)
+                activityProgress(activity, wide: true)
+                activityIcon(activity)
+            }
+            .frame(width: activityContentWidth, alignment: side == .left ? .trailing : .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func activityProgress(_ activity: LiveActivity, wide: Bool) -> some View {
+        if itemStyle.showProgress, let progress = activity.progress {
+            ProgressView(value: progress)
+                .controlSize(.mini)
+                .frame(width: wide ? min(60, max(28, activityContentWidth * 0.42))
+                                   : min(38, max(24, activityContentWidth * 0.22)))
         }
     }
 
@@ -921,10 +989,7 @@ struct ClosedNotchSlot: View {
                 .frame(width: sideLength, height: sideLength)
                 .clipShape(RoundedRectangle(cornerRadius: max(2, sideLength * 0.22), style: .continuous))
         } else {
-            Image(systemName: activity.resolvedSymbolName)
-                .font(.system(size: itemIconSize, weight: itemFontWeight))
-                .foregroundStyle(itemIconColor)
-                .frame(width: sideLength, height: sideLength, alignment: .center)
+            itemIcon(activity.resolvedSymbolName)
         }
     }
 

@@ -1666,7 +1666,9 @@ final class WindowManager {
         func itemIconWidth(_ item: ClosedNotchItem) -> Double {
             let style = closedStyle(item)
             let iconSize = min(max(8, style.iconSize ?? itemTextSize(item)), max(8, innerHeight))
-            return max(12, iconSize + 2)
+            let containerPadding = style.resolvedIconStyle == .plain ? 0 : style.resolvedIconPadding * 2
+            let capsuleExtra = style.resolvedIconStyle == .capsule ? 4 : 0
+            return max(12, iconSize + 2 + containerPadding + capsuleExtra)
         }
 
         func composedWidth(_ item: ClosedNotchItem, textWidth: Double, automaticShowsIcon: Bool) -> Double {
@@ -1679,8 +1681,10 @@ final class WindowManager {
                     return textWidth > 0 ? icon + gap + textWidth : icon
                 }
                 return textWidth
-            case .iconAndText:
+            case .iconAndText, .textAndIcon:
                 return textWidth > 0 ? icon + gap + textWidth : icon
+            case .stacked, .stackedReversed:
+                return max(icon, textWidth)
             case .textOnly:
                 return textWidth
             case .iconOnly:
@@ -1786,7 +1790,8 @@ final class WindowManager {
             let configuredIcon = defaults.object(forKey: "HaloBluetoothClosedNotchIconSize") == nil
                 ? 16.0 : defaults.double(forKey: "HaloBluetoothClosedNotchIconSize")
             let iconSize = min(max(8, configuredIcon), max(8, activitySize * 1.8))
-            let iconWidth = showIcon ? max(12, iconSize + 2) : 0
+            let iconContainerPadding = widgetStyle.resolvedIconStyle == .plain ? 0 : widgetStyle.resolvedIconPadding * 2
+            let iconWidth = showIcon ? max(12, iconSize + 2 + iconContainerPadding) : 0
             let labelWidth = showLabel ? textWidth(label, font: activityFont) : 0
             let detailFont = NSFont.systemFont(ofSize: max(8, activitySize * 0.76), weight: nsWeight(widgetStyle.fontWeight))
             let detailWidth = showDevice && !activity.detail.isEmpty

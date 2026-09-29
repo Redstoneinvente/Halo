@@ -1554,10 +1554,115 @@ struct ClosedNotchSettingsView: View {
                 .foregroundStyle(.secondary)
 
             if item != .mirror {
-                Picker("Presentation", selection: style.layout) {
-                    ForEach(ClosedNotchWidgetLayout.allCases) { mode in
+                HStack {
+                    Text("Design")
+                    Spacer()
+                    Menu {
+                        ForEach(ClosedNotchWidgetDesignPreset.allCases) { preset in
+                            Button(preset.rawValue) {
+                                applyDesignPreset(preset, to: item)
+                            }
+                        }
+                    } label: {
+                        Label("Apply preset", systemImage: "paintpalette")
+                    }
+                    .menuStyle(.borderlessButton)
+                }
+
+                Picker("Layout", selection: style.layout) {
+                    ForEach(availableLayouts(for: item)) { mode in
                         Text(mode.rawValue).tag(mode)
                     }
+                }
+
+                Picker(
+                    "Icon",
+                    selection: Binding<String?>(
+                        get: { style.wrappedValue.iconSymbol },
+                        set: {
+                            var value = style.wrappedValue
+                            value.iconSymbol = $0
+                            style.wrappedValue = value
+                        }
+                    )
+                ) {
+                    Text("Default").tag(nil as String?)
+                    ForEach(Array(iconChoices(for: item).enumerated()), id: \.offset) { _, choice in
+                        Label(choice.name, systemImage: choice.symbol)
+                            .tag(Optional(choice.symbol))
+                    }
+                }
+
+                Picker(
+                    "Icon treatment",
+                    selection: Binding(
+                        get: { style.wrappedValue.resolvedIconStyle },
+                        set: {
+                            var value = style.wrappedValue
+                            value.iconStyle = $0
+                            style.wrappedValue = value
+                        }
+                    )
+                ) {
+                    ForEach(ClosedNotchIconStyle.allCases) { iconStyle in
+                        Text(iconStyle.rawValue).tag(iconStyle)
+                    }
+                }
+
+                if style.wrappedValue.resolvedIconStyle != .plain {
+                    Toggle(
+                        "Custom icon background color",
+                        isOn: Binding(
+                            get: { style.wrappedValue.iconBackgroundColor != nil },
+                            set: { enabled in
+                                var value = style.wrappedValue
+                                value.iconBackgroundColor = enabled ? (value.iconColor ?? value.textColor ?? options.wrappedValue.color) : nil
+                                style.wrappedValue = value
+                            }
+                        )
+                    )
+                    if style.wrappedValue.iconBackgroundColor != nil {
+                        ColorPicker(
+                            "Icon background",
+                            selection: Binding(
+                                get: { style.wrappedValue.iconBackgroundColor?.color ?? options.wrappedValue.color.color },
+                                set: {
+                                    var value = style.wrappedValue
+                                    value.iconBackgroundColor = WidgetColor($0)
+                                    style.wrappedValue = value
+                                }
+                            ),
+                            supportsOpacity: false
+                        )
+                    }
+                    PreciseSlider(
+                        title: "Icon background strength",
+                        value: Binding(
+                            get: { style.wrappedValue.resolvedIconBackgroundOpacity },
+                            set: {
+                                var value = style.wrappedValue
+                                value.iconBackgroundOpacity = $0
+                                style.wrappedValue = value
+                            }
+                        ),
+                        range: 0...1,
+                        step: 0.01,
+                        decimals: 2
+                    )
+                    PreciseSlider(
+                        title: "Icon container padding",
+                        value: Binding(
+                            get: { style.wrappedValue.resolvedIconPadding },
+                            set: {
+                                var value = style.wrappedValue
+                                value.iconPadding = $0
+                                style.wrappedValue = value
+                            }
+                        ),
+                        range: 0...12,
+                        step: 1,
+                        suffix: "pt"
+                    )
                 }
 
                 Toggle(
@@ -1862,6 +1967,205 @@ struct ClosedNotchSettingsView: View {
                 options.wrappedValue = value
             }
         }
+    }
+
+    private func availableLayouts(for item: ClosedNotchItem) -> [ClosedNotchWidgetLayout] {
+        if item == .clock {
+            return [.automatic, .iconAndText, .textAndIcon, .textOnly, .iconOnly]
+        }
+        return ClosedNotchWidgetLayout.allCases
+    }
+
+    private func iconChoices(for item: ClosedNotchItem) -> [(name: String, symbol: String)] {
+        switch item {
+        case .clock:
+            return [
+                ("Clock", "clock"),
+                ("Clock filled", "clock.fill"),
+                ("Alarm", "alarm"),
+                ("Watch", "applewatch"),
+                ("Time zone", "globe")
+            ]
+        case .date:
+            return [
+                ("Calendar", "calendar"),
+                ("Calendar circle", "calendar.circle"),
+                ("Calendar badge", "calendar.badge.clock"),
+                ("Day", "calendar.day.timeline.left"),
+                ("Week", "calendar.badge.exclamationmark")
+            ]
+        case .timer:
+            return [
+                ("Timer", "timer"),
+                ("Stopwatch", "stopwatch"),
+                ("Hourglass", "hourglass"),
+                ("Clock arrow", "clock.arrow.circlepath"),
+                ("Gauge", "gauge.with.dots.needle.33percent")
+            ]
+        case .battery:
+            return [
+                ("Battery", "battery.100"),
+                ("Bolt", "bolt.fill"),
+                ("Power plug", "powerplug.fill"),
+                ("Energy", "bolt.circle"),
+                ("Power", "power")
+            ]
+        case .files:
+            return [
+                ("Tray", "tray"),
+                ("Folder", "folder"),
+                ("Documents", "doc.on.doc"),
+                ("Archive", "archivebox"),
+                ("Downloads", "arrow.down.circle")
+            ]
+        case .activity:
+            return [
+                ("Activity", "bell.badge"),
+                ("Bell", "bell"),
+                ("Pulse", "waveform.path.ecg"),
+                ("Live", "dot.radiowaves.left.and.right"),
+                ("Spark", "sparkles")
+            ]
+        case .mirror:
+            return [("Camera", "camera.fill")]
+        case .media, .visualizer, .none:
+            return []
+        }
+    }
+
+    private func applyDesignPreset(_ preset: ClosedNotchWidgetDesignPreset, to item: ClosedNotchItem) {
+        var value = widgetStyle(item).wrappedValue
+
+        // Presets affect presentation only. Widget-specific behavior such as Date format,
+        // Clock time settings and Activity detail/progress preferences stays untouched.
+        value.textColor = nil
+        value.iconColor = nil
+        value.iconBackgroundColor = nil
+        value.iconBackgroundOpacity = nil
+        value.iconPadding = nil
+        value.fontSize = nil
+        value.iconSize = nil
+        value.spacing = nil
+        value.opacity = 1
+        value.borderColor = WidgetColor.white
+        value.borderOpacity = 0.18
+
+        switch preset {
+        case .minimal:
+            value.layout = .automatic
+            value.fontWeight = .regular
+            value.iconStyle = .plain
+            value.backgroundStyle = .none
+            value.horizontalPadding = 0
+            value.verticalPadding = 0
+            value.cornerRadius = 8
+            value.borderWidth = 0
+
+        case .capsule:
+            value.layout = .iconAndText
+            value.fontWeight = .medium
+            value.iconStyle = .plain
+            value.backgroundStyle = .tint
+            value.backgroundOpacity = 0.14
+            value.horizontalPadding = 9
+            value.verticalPadding = 3
+            value.cornerRadius = 24
+            value.borderWidth = 0
+
+        case .glass:
+            value.layout = .iconAndText
+            value.fontWeight = .medium
+            value.iconStyle = .glassCircle
+            value.iconPadding = 3
+            value.backgroundStyle = .glass
+            value.backgroundOpacity = 0.12
+            value.horizontalPadding = 8
+            value.verticalPadding = 3
+            value.cornerRadius = 11
+            value.borderWidth = 0.7
+            value.borderOpacity = 0.16
+
+        case .outline:
+            value.layout = .iconAndText
+            value.fontWeight = .medium
+            value.iconStyle = .outlineRounded
+            value.iconPadding = 3
+            value.backgroundStyle = .none
+            value.horizontalPadding = 8
+            value.verticalPadding = 3
+            value.cornerRadius = 9
+            value.borderWidth = 1
+            value.borderOpacity = 0.34
+
+        case .filled:
+            value.layout = .iconAndText
+            value.fontWeight = .semibold
+            value.iconStyle = .roundedSquare
+            value.iconPadding = 3
+            value.iconBackgroundOpacity = 0.20
+            value.backgroundStyle = .solid
+            value.backgroundColor = WidgetColor(red: 0.16, green: 0.16, blue: 0.18)
+            value.backgroundOpacity = 0.94
+            value.horizontalPadding = 8
+            value.verticalPadding = 3
+            value.cornerRadius = 10
+            value.borderWidth = 0
+
+        case .iconTile:
+            value.layout = .iconOnly
+            value.fontWeight = .semibold
+            value.iconStyle = .glassRounded
+            value.iconSize = 14
+            value.iconPadding = 5
+            value.backgroundStyle = .none
+            value.horizontalPadding = 0
+            value.verticalPadding = 0
+            value.cornerRadius = 10
+            value.borderWidth = 0
+
+        case .stackedTile:
+            value.layout = item == .clock ? .iconAndText : .stacked
+            value.fontWeight = .semibold
+            value.iconStyle = .roundedSquare
+            value.iconPadding = 3
+            value.iconBackgroundOpacity = 0.18
+            value.spacing = 3
+            value.backgroundStyle = .tint
+            value.backgroundOpacity = 0.12
+            value.horizontalPadding = 7
+            value.verticalPadding = 4
+            value.cornerRadius = 10
+            value.borderWidth = 0
+
+        case .compactBadge:
+            value.layout = .iconAndText
+            value.fontWeight = .semibold
+            value.iconStyle = .circle
+            value.iconPadding = 2
+            value.iconBackgroundOpacity = 0.16
+            value.spacing = 4
+            value.backgroundStyle = .tint
+            value.backgroundOpacity = 0.10
+            value.horizontalPadding = 6
+            value.verticalPadding = 2
+            value.cornerRadius = 8
+            value.borderWidth = 0
+
+        case .boldAccent:
+            value.layout = .textAndIcon
+            value.fontWeight = .bold
+            value.iconStyle = .circle
+            value.iconPadding = 3
+            value.iconBackgroundOpacity = 0.28
+            value.spacing = 6
+            value.backgroundStyle = .none
+            value.horizontalPadding = 2
+            value.verticalPadding = 1
+            value.cornerRadius = 8
+            value.borderWidth = 0
+        }
+
+        widgetStyle(item).wrappedValue = value
     }
 
     private func itemPicker(_ title: String, _ value: Binding<ClosedNotchItem>) -> some View {

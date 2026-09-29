@@ -2112,8 +2112,36 @@ enum ClosedNotchItem: String, Codable, CaseIterable, Identifiable {
 enum ClosedNotchWidgetLayout: String, Codable, CaseIterable, Identifiable {
     case automatic = "Automatic"
     case iconAndText = "Icon + Text"
+    case textAndIcon = "Text + Icon"
+    case stacked = "Icon Above"
+    case stackedReversed = "Icon Below"
     case textOnly = "Text Only"
     case iconOnly = "Icon Only"
+    var id: String { rawValue }
+}
+
+enum ClosedNotchIconStyle: String, Codable, CaseIterable, Identifiable {
+    case plain = "Plain"
+    case circle = "Tinted Circle"
+    case roundedSquare = "Tinted Square"
+    case capsule = "Tinted Capsule"
+    case glassCircle = "Glass Circle"
+    case glassRounded = "Glass Square"
+    case outlineCircle = "Outline Circle"
+    case outlineRounded = "Outline Square"
+    var id: String { rawValue }
+}
+
+enum ClosedNotchWidgetDesignPreset: String, CaseIterable, Identifiable {
+    case minimal = "Minimal"
+    case capsule = "Capsule"
+    case glass = "Frosted Glass"
+    case outline = "Outline"
+    case filled = "Filled"
+    case iconTile = "Icon Tile"
+    case stackedTile = "Stacked Tile"
+    case compactBadge = "Compact Badge"
+    case boldAccent = "Bold Accent"
     var id: String { rawValue }
 }
 
@@ -2162,6 +2190,16 @@ struct ClosedNotchWidgetStyle: Codable, Equatable {
     var iconSize: Double?
     var spacing: Double?
 
+    // Optional additions keep profiles saved by older Halo builds decodable.
+    var iconSymbol: String?
+    var iconStyle: ClosedNotchIconStyle?
+    var iconBackgroundColor: WidgetColor?
+    var iconBackgroundOpacity: Double?
+    var iconPadding: Double?
+    var resolvedIconStyle: ClosedNotchIconStyle { iconStyle ?? .plain }
+    var resolvedIconBackgroundOpacity: Double { min(1, max(0, iconBackgroundOpacity ?? 0.16)) }
+    var resolvedIconPadding: Double { min(12, max(0, iconPadding ?? 3)) }
+
     var backgroundStyle: ClosedNotchWidgetBackgroundStyle = .none
     var backgroundColor = WidgetColor.white
     var backgroundOpacity = 0.12
@@ -2187,7 +2225,7 @@ struct ClosedNotchWidgetStyle: Codable, Equatable {
     var clockShowDate = true
 
     func validated() throws -> ClosedNotchWidgetStyle {
-        let optionalNumbers = [fontSize, iconSize, spacing, width].compactMap { $0 }
+        let optionalNumbers = [fontSize, iconSize, spacing, width, iconBackgroundOpacity, iconPadding].compactMap { $0 }
         let numbers = optionalNumbers + [
             backgroundOpacity, horizontalPadding, verticalPadding, cornerRadius,
             borderWidth, borderOpacity, opacity
@@ -2199,6 +2237,12 @@ struct ClosedNotchWidgetStyle: Codable, Equatable {
         if let iconSize { value.iconSize = min(40, max(8, iconSize)) }
         if let spacing { value.spacing = min(24, max(0, spacing)) }
         if let width { value.width = min(320, max(32, width)) }
+        if let iconBackgroundOpacity { value.iconBackgroundOpacity = min(1, max(0, iconBackgroundOpacity)) }
+        if let iconPadding { value.iconPadding = min(12, max(0, iconPadding)) }
+        if let iconSymbol {
+            let trimmed = iconSymbol.trimmingCharacters(in: .whitespacesAndNewlines)
+            value.iconSymbol = trimmed.isEmpty ? nil : String(trimmed.prefix(80))
+        }
 
         value.backgroundOpacity = min(1, max(0, backgroundOpacity))
         value.horizontalPadding = min(24, max(0, horizontalPadding))
@@ -2210,6 +2254,7 @@ struct ClosedNotchWidgetStyle: Codable, Equatable {
 
         value.textColor = try textColor?.validated()
         value.iconColor = try iconColor?.validated()
+        value.iconBackgroundColor = try iconBackgroundColor?.validated()
         value.backgroundColor = try backgroundColor.validated()
         value.borderColor = try borderColor.validated()
         return value
