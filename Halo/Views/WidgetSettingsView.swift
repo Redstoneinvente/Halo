@@ -824,6 +824,12 @@ struct WidgetSettingsView: View {
 }
 
 struct ClosedNotchSettingsView: View {
+    private struct IconChoice: Identifiable {
+        let name: String
+        let symbol: String
+        var id: String { symbol }
+    }
+
     private enum SettingsPage: String, CaseIterable, Identifiable {
         case content = "Content"
         case media = "Media"
@@ -1586,7 +1592,7 @@ struct ClosedNotchSettingsView: View {
                     )
                 ) {
                     Text("Default").tag(nil as String?)
-                    ForEach(Array(iconChoices(for: item).enumerated()), id: \.offset) { _, choice in
+                    ForEach(iconChoices(for: item)) { choice in
                         Label(choice.name, systemImage: choice.symbol)
                             .tag(Optional(choice.symbol))
                     }
@@ -1982,58 +1988,58 @@ struct ClosedNotchSettingsView: View {
         return ClosedNotchWidgetLayout.allCases
     }
 
-    private func iconChoices(for item: ClosedNotchItem) -> [(name: String, symbol: String)] {
+    private func iconChoices(for item: ClosedNotchItem) -> [IconChoice] {
         switch item {
         case .clock:
             return [
-                ("Clock", "clock"),
-                ("Clock filled", "clock.fill"),
-                ("Alarm", "alarm"),
-                ("Watch", "applewatch"),
-                ("Time zone", "globe")
+                IconChoice(name: "Clock", symbol: "clock"),
+                IconChoice(name: "Clock filled", symbol: "clock.fill"),
+                IconChoice(name: "Alarm", symbol: "alarm"),
+                IconChoice(name: "Watch", symbol: "applewatch"),
+                IconChoice(name: "Time zone", symbol: "globe")
             ]
         case .date:
             return [
-                ("Calendar", "calendar"),
-                ("Calendar circle", "calendar.circle"),
-                ("Calendar badge", "calendar.badge.clock"),
-                ("Day", "calendar.day.timeline.left"),
-                ("Week", "calendar.badge.exclamationmark")
+                IconChoice(name: "Calendar", symbol: "calendar"),
+                IconChoice(name: "Calendar circle", symbol: "calendar.circle"),
+                IconChoice(name: "Calendar badge", symbol: "calendar.badge.clock"),
+                IconChoice(name: "Day", symbol: "calendar.day.timeline.left"),
+                IconChoice(name: "Week", symbol: "calendar.badge.exclamationmark")
             ]
         case .timer:
             return [
-                ("Timer", "timer"),
-                ("Stopwatch", "stopwatch"),
-                ("Hourglass", "hourglass"),
-                ("Clock arrow", "clock.arrow.circlepath"),
-                ("Gauge", "gauge.with.dots.needle.33percent")
+                IconChoice(name: "Timer", symbol: "timer"),
+                IconChoice(name: "Stopwatch", symbol: "stopwatch"),
+                IconChoice(name: "Hourglass", symbol: "hourglass"),
+                IconChoice(name: "Clock arrow", symbol: "clock.arrow.circlepath"),
+                IconChoice(name: "Gauge", symbol: "gauge.with.dots.needle.33percent")
             ]
         case .battery:
             return [
-                ("Battery", "battery.100"),
-                ("Bolt", "bolt.fill"),
-                ("Power plug", "powerplug.fill"),
-                ("Energy", "bolt.circle"),
-                ("Power", "power")
+                IconChoice(name: "Battery", symbol: "battery.100"),
+                IconChoice(name: "Bolt", symbol: "bolt.fill"),
+                IconChoice(name: "Power plug", symbol: "powerplug.fill"),
+                IconChoice(name: "Energy", symbol: "bolt.circle"),
+                IconChoice(name: "Power", symbol: "power")
             ]
         case .files:
             return [
-                ("Tray", "tray"),
-                ("Folder", "folder"),
-                ("Documents", "doc.on.doc"),
-                ("Archive", "archivebox"),
-                ("Downloads", "arrow.down.circle")
+                IconChoice(name: "Tray", symbol: "tray"),
+                IconChoice(name: "Folder", symbol: "folder"),
+                IconChoice(name: "Documents", symbol: "doc.on.doc"),
+                IconChoice(name: "Archive", symbol: "archivebox"),
+                IconChoice(name: "Downloads", symbol: "arrow.down.circle")
             ]
         case .activity:
             return [
-                ("Activity", "bell.badge"),
-                ("Bell", "bell"),
-                ("Pulse", "waveform.path.ecg"),
-                ("Live", "dot.radiowaves.left.and.right"),
-                ("Spark", "sparkles")
+                IconChoice(name: "Activity", symbol: "bell.badge"),
+                IconChoice(name: "Bell", symbol: "bell"),
+                IconChoice(name: "Pulse", symbol: "waveform.path.ecg"),
+                IconChoice(name: "Live", symbol: "dot.radiowaves.left.and.right"),
+                IconChoice(name: "Spark", symbol: "sparkles")
             ]
         case .mirror:
-            return [("Camera", "camera.fill")]
+            return [IconChoice(name: "Camera", symbol: "camera.fill")]
         case .media, .visualizer, .none:
             return []
         }

@@ -988,7 +988,6 @@ struct ClosedNotchSlot: View {
     }
     @ViewBuilder
     private func activityIcon(_ activity: LiveActivity) -> some View {
-        let sideLength = max(12, itemIconSize + 2)
         if let bundleID = activity.sourceBundleIdentifier,
            let icon = liveActivityApplicationIcon(bundleIdentifier: bundleID) {
             styledIconContainer {
