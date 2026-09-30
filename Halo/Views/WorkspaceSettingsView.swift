@@ -1961,6 +1961,8 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     @ObservedObject var store: AppStore
     @ObservedObject var workspace: WorkspaceStore
     @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
+    @AppStorage("HaloPhysicsAnimationsEnabled") private var physicsAnimationsEnabled = false
+    @AppStorage("HaloPhysicsAnimationSoundsEnabled") private var physicsAnimationSoundsEnabled = false
     @State private var page: HaloAppearancePage = .openedSpace
     @State private var showingOpenWorkspaceEditor = false
     @ObservedObject private var geometryEditor = SurfaceGeometryEditingSession.shared
@@ -2942,6 +2944,15 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     @ViewBuilder private var motion: some View {
         Section("Animation") {
             Toggle("Animate expansion", isOn: activeThemeBinding.animations)
+            Toggle("Physics-based motion", isOn: $physicsAnimationsEnabled)
+            Text("Uses inertia and damping on Halo's real window geometry for a more tactile, interruptible feel.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Toggle("Subtle motion sounds", isOn: $physicsAnimationSoundsEnabled)
+                .disabled(!physicsAnimationsEnabled)
+            Text("Adds a very quiet settling cue to meaningful open and close transitions. No looping or per-frame audio.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Picker(
                 "Animation timing",
                 selection: Binding(
