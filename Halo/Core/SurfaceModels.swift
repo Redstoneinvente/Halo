@@ -244,18 +244,32 @@ struct SurfaceOptions: Codable, Equatable {
     var compactHeight = 40.0
     var opening: SurfaceTransition = .spring
     var closing: SurfaceTransition = .resize
+    // Legacy shared values remain encoded for backwards compatibility. Directional
+    // values are authoritative when present.
     var duration = 0.3
     var damping = 0.8
+    var openingDuration: Double? = nil
+    var closingDuration: Double? = nil
+    var openingDamping: Double? = nil
+    var closingDamping: Double? = nil
+    var resolvedOpeningDuration: Double { openingDuration ?? duration }
+    var resolvedClosingDuration: Double { closingDuration ?? duration }
+    var resolvedOpeningDamping: Double { openingDamping ?? damping }
+    var resolvedClosingDamping: Double { closingDamping ?? damping }
     var topRadius = 6.0
     var bottomRadius = 24.0
     var shoulder = 18.0
     func validated() throws -> SurfaceOptions {
-        guard [compactHeight, duration, damping, topRadius, bottomRadius, shoulder].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        guard [compactHeight, duration, damping, openingDuration ?? duration, closingDuration ?? duration, openingDamping ?? damping, closingDamping ?? damping, topRadius, bottomRadius, shoulder].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var result = self
         result.compactHeight = min(100, max(16, compactHeight))
         result.offsets = try offsets?.validated()
         result.duration = min(1.2, max(0.1, duration))
         result.damping = min(1, max(0.4, damping))
+        result.openingDuration = min(1.2, max(0.1, openingDuration ?? duration))
+        result.closingDuration = min(1.2, max(0.1, closingDuration ?? duration))
+        result.openingDamping = min(1, max(0.4, openingDamping ?? damping))
+        result.closingDamping = min(1, max(0.4, closingDamping ?? damping))
         result.topRadius = min(64, max(0, topRadius))
         result.bottomRadius = min(64, max(0, bottomRadius))
         result.shoulder = min(48, max(0, shoulder))
@@ -395,7 +409,8 @@ enum SurfaceMotion {
 extension SurfaceOptions {
     private enum HaloCodingKeys: String, CodingKey {
         case useStyleContour, outlineEnabled, offsets, shape, compactHeight, opening, closing,
-             duration, damping, topRadius, bottomRadius, shoulder
+             duration, damping, openingDuration, closingDuration, openingDamping, closingDamping,
+             topRadius, bottomRadius, shoulder
     }
 
     init(from decoder: Decoder) throws {
@@ -410,6 +425,10 @@ extension SurfaceOptions {
         closing = c.haloDecode(SurfaceTransition.self, forKey: .closing, default: fallback.closing)
         duration = c.haloDecode(Double.self, forKey: .duration, default: fallback.duration)
         damping = c.haloDecode(Double.self, forKey: .damping, default: fallback.damping)
+        openingDuration = c.haloOptional(Double.self, forKey: .openingDuration)
+        closingDuration = c.haloOptional(Double.self, forKey: .closingDuration)
+        openingDamping = c.haloOptional(Double.self, forKey: .openingDamping)
+        closingDamping = c.haloOptional(Double.self, forKey: .closingDamping)
         topRadius = c.haloDecode(Double.self, forKey: .topRadius, default: fallback.topRadius)
         bottomRadius = c.haloDecode(Double.self, forKey: .bottomRadius, default: fallback.bottomRadius)
         shoulder = c.haloDecode(Double.self, forKey: .shoulder, default: fallback.shoulder)
