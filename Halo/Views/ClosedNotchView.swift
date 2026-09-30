@@ -1083,9 +1083,9 @@ struct ClosedNotchSlot: View {
         if let weight = itemStyle.fontWeight {
             value.weight = weight
         }
-        if itemStyle.fontSize != nil {
-            value.clock.automaticTypography = false
-        }
+        // Closed-notch sizing is authoritative, whether it comes from the
+        // global closed-notch font size or a widget-specific override.
+        value.clock.automaticTypography = false
         if !itemStyle.useClockWidgetSettings {
             value.clock.twentyFourHour = itemStyle.clockTwentyFourHour
             value.clock.showSeconds = itemStyle.clockShowSeconds

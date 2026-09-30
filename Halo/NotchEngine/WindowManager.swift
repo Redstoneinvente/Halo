@@ -1530,7 +1530,7 @@ final class WindowManager {
                     clock.showSeconds = style.clockShowSeconds
                     clock.showDate = style.clockShowDate
                 }
-                if style.fontSize != nil { clock.automaticTypography = false }
+                clock.automaticTypography = false
                 if let visualStyle = style.clockVisualStyle { clock.visualStyle = visualStyle }
 
                 let primarySize = clock.usesAutomaticTypography
@@ -2008,9 +2008,7 @@ final class WindowManager {
                 if let weight = closedClockStyle.fontWeight {
                     style.weight = weight
                 }
-                if closedClockStyle.fontSize != nil {
-                    style.clock.automaticTypography = false
-                }
+                style.clock.automaticTypography = false
                 if !closedClockStyle.useClockWidgetSettings {
                     style.clock.twentyFourHour = closedClockStyle.clockTwentyFourHour
                     style.clock.showSeconds = closedClockStyle.clockShowSeconds
