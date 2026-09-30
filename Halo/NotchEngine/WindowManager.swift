@@ -683,12 +683,13 @@ final class SurfaceAnimator {
         let initial = panel.frame
         let initialAlpha = panel.alphaValue
         let start = CACurrentMediaTime()
-        let duration = options.duration
+        let duration = opening ? options.resolvedOpeningDuration : options.resolvedClosingDuration
+        let directionalDamping = opening ? options.resolvedOpeningDamping : options.resolvedClosingDamping
         let usePhysics = HaloMotionFeedback.physicsEnabled
         // A restrained under-damped response gives the notch a small amount of physical
         // overshoot while remaining controlled. The display-link animator keeps this on
         // the actual NSPanel geometry instead of applying a decorative SwiftUI transform.
-        let physicsDamping = min(0.94, max(0.72, options.damping))
+        let physicsDamping = min(0.94, max(0.72, directionalDamping))
         let physicsOmega = 10.5 / max(0.16, duration)
         guard let view = panel.contentView else {
             if synchronizeClosedGeometry {
@@ -731,7 +732,7 @@ final class SurfaceAnimator {
                 let response = 1 - envelope * (cos(wd * elapsed) + (zeta / sqrt(max(0.0001, 1 - zeta * zeta))) * sin(wd * elapsed))
                 p = min(1.035, max(0, response))
             } else {
-                p = SurfaceMotion.progress(t, transition: transition, preset: preset, damping: options.damping)
+                p = SurfaceMotion.progress(t, transition: transition, preset: preset, damping: directionalDamping)
             }
             let width = max(1, initial.width + (target.width - initial.width) * p)
             let height = max(1, initial.height + (target.height - initial.height) * p)
