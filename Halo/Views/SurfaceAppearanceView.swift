@@ -433,12 +433,38 @@ private enum GlassAppearancePreset: String, CaseIterable, Identifiable {
 
         if scope == .all || scope == .motion {
             Section("Transitions") {
-                Picker("Opening", selection: $appearance.surface.opening) { ForEach(SurfaceTransition.allCases) { Text($0.rawValue).tag($0) } }
-                Picker("Closing", selection: $appearance.surface.closing) { ForEach(SurfaceTransition.allCases) { Text($0.rawValue).tag($0) } }
-                PreciseSlider(title: "Duration", value: $appearance.surface.duration, range: 0.1...1.2, step: 0.05, suffix: "s", decimals: 2)
+                GroupBox("Opening") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Picker("Transition", selection: $appearance.surface.opening) { ForEach(SurfaceTransition.allCases) { Text($0.rawValue).tag($0) } }
+                        PreciseSlider(title: "Duration", value: Binding(
+                            get: { appearance.surface.resolvedOpeningDuration },
+                            set: { appearance.surface.openingDuration = $0 }
+                        ), range: 0.1...1.2, step: 0.05, suffix: "s", decimals: 2)
+                        if appearance.surface.opening == .spring {
+                            PreciseSlider(title: "Spring damping", value: Binding(
+                                get: { appearance.surface.resolvedOpeningDamping },
+                                set: { appearance.surface.openingDamping = $0 }
+                            ), range: 0.4...1, step: 0.05, decimals: 2)
+                        }
+                    }.padding(4)
+                }
+                GroupBox("Closing") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Picker("Transition", selection: $appearance.surface.closing) { ForEach(SurfaceTransition.allCases) { Text($0.rawValue).tag($0) } }
+                        PreciseSlider(title: "Duration", value: Binding(
+                            get: { appearance.surface.resolvedClosingDuration },
+                            set: { appearance.surface.closingDuration = $0 }
+                        ), range: 0.1...1.2, step: 0.05, suffix: "s", decimals: 2)
+                        if appearance.surface.closing == .spring {
+                            PreciseSlider(title: "Spring damping", value: Binding(
+                                get: { appearance.surface.resolvedClosingDamping },
+                                set: { appearance.surface.closingDamping = $0 }
+                            ), range: 0.4...1, step: 0.05, decimals: 2)
+                        }
+                    }.padding(4)
+                }
                 if appearance.surface.opening == .spring || appearance.surface.closing == .spring {
-                    PreciseSlider(title: "Spring damping", value: $appearance.surface.damping, range: 0.4...1, step: 0.05, decimals: 2)
-                    Text("Lower damping adds bounce; higher damping settles sooner.").font(.caption)
+                    Text("Lower damping adds bounce; higher damping settles sooner. Each direction is tuned independently.").font(.caption)
                 }
                 Text("Reduce Motion and the animation-off setting make transitions immediate.").font(.caption).foregroundStyle(.secondary)
             }
