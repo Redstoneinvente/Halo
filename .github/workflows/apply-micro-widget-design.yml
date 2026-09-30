@@ -18,33 +18,64 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Repair reported compile errors
+      - name: Fix closed notch widget centering and scaling
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('Halo/Views/VisualWorkspaceAdaptiveWidgets.swift')
+
+          p = Path('Halo/Views/ClosedNotchView.swift')
           s = p.read_text()
-          fixes = [
-              ('ForEach(orderedMetrics.prefix(8)) { item in', 'ForEach(Array(orderedMetrics.prefix(8).enumerated()), id: \\.offset) { _, item in'),
-              ('Text(itemValue.value).monospacedDigit().foregroundStyle(.secondary)', 'Text(itemValue.text).monospacedDigit().foregroundStyle(.secondary)'),
-              ('micro(region: true)', 'primaryAction(iconOnly: true)'),
+
+          replacements = [
+              (
+                  '.frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)\n        .padding(.vertical, layoutMetrics.verticalPadding)',
+                  '.frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: .center)\n        .padding(.vertical, layoutMetrics.verticalPadding)'
+              ),
+              (
+                  'HStack(spacing: elementSpacing) { standardElements }\n            .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)',
+                  'HStack(spacing: elementSpacing) { standardElements }\n            .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: .center)'
+              ),
+              (
+                  '''                // Give the compact clock the exact slot proposal. Its internal compact
+                // layout can now shrink as a last resort when the display edge prevents
+                // the notch from growing any farther.
+                .frame(
+                    width: CGFloat(widgetContentWidth),
+                    height: CGFloat(widgetContentHeight)
+                )
+                .clipped()''',
+                  '''                // Keep the clock centered inside the adaptive slot while allowing
+                // its real typography to grow with the configured widget text size.
+                .frame(
+                    maxWidth: CGFloat(widgetContentWidth),
+                    maxHeight: CGFloat(widgetContentHeight),
+                    alignment: .center
+                )
+                .clipped()'''
+              ),
           ]
-          for old, new in fixes:
-              if old not in s:
-                  raise SystemExit('Missing expected source: ' + old)
+
+          for old, new in replacements:
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one match, found {count}: {old[:90]!r}')
               s = s.replace(old, new, 1)
+
           p.write_text(s)
           PY
 
       - name: Parse repaired Swift source
-        run: xcrun swiftc -parse Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
+        run: xcrun swiftc -parse Halo/Views/ClosedNotchView.swift
 
-      - name: Commit compile fix
+      - name: Restore repair workflow and commit source fix
         run: |
+          git checkout 2eca2ecf159159cd301bd14e5094a638b0df1fbe -- .github/workflows/apply-micro-widget-design.yml .github/micro-widget-design-trigger.txt
+          rm -f .github/workflows/fix-closed-notch-widget-layout.yml
+          rm -f .github/fix-closed-notch-widget-layout-trigger.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Halo/Views/VisualWorkspaceAdaptiveWidgets.swift
-          git commit -m 'Fix deliberate 1x1 widget compile errors'
+          git add Halo/Views/ClosedNotchView.swift .github/workflows/apply-micro-widget-design.yml .github/micro-widget-design-trigger.txt .github/workflows/fix-closed-notch-widget-layout.yml .github/fix-closed-notch-widget-layout-trigger.txt
+          git commit -m 'Fix closed notch widget centering and scaling'
           git push origin HEAD:main
 
       - name: Full build diagnostic
