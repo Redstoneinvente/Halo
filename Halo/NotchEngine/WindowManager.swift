@@ -603,6 +603,32 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
 }
 
 @MainActor
+enum HaloMotionFeedback {
+    private static var lastSoundTime: TimeInterval = 0
+
+    static var physicsEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "HaloPhysicsAnimationsEnabled")
+    }
+
+    static var soundEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "HaloPhysicsAnimationSoundsEnabled")
+    }
+
+    static func settle(opening: Bool) {
+        guard physicsEnabled, soundEnabled else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastSoundTime > 0.12 else { return }
+        lastSoundTime = now
+
+        // Keep motion audio deliberately quiet. It should register as tactility, not a notification.
+        let preferredNames = opening ? ["Tink", "Pop"] : ["Pop", "Tink"]
+        guard let sound = preferredNames.lazy.compactMap({ NSSound(named: NSSound.Name($0)) }).first else { return }
+        sound.volume = opening ? 0.055 : 0.04
+        sound.play()
+    }
+}
+
+@MainActor
 final class SurfaceAnimator {
     private enum HorizontalResizeAnchor { case left, right, center }
 
@@ -658,6 +684,12 @@ final class SurfaceAnimator {
         let initialAlpha = panel.alphaValue
         let start = CACurrentMediaTime()
         let duration = options.duration
+        let usePhysics = HaloMotionFeedback.physicsEnabled
+        // A restrained under-damped response gives the notch a small amount of physical
+        // overshoot while remaining controlled. The display-link animator keeps this on
+        // the actual NSPanel geometry instead of applying a decorative SwiftUI transform.
+        let physicsDamping = min(0.94, max(0.72, options.damping))
+        let physicsOmega = 10.5 / max(0.16, duration)
         guard let view = panel.contentView else {
             if synchronizeClosedGeometry {
                 syncClosedGeometry(state: state, frame: target, cameraFrame: closedCameraFrame)
@@ -687,8 +719,20 @@ final class SurfaceAnimator {
 
         clock.start(view: view) { [weak self, weak panel, weak state] timestamp in
             guard let self, let panel, let state else { self?.cancel(); return }
-            let t = min(1, max(0, timestamp - start) / max(0.01, duration))
-            let p = SurfaceMotion.progress(t, transition: transition, preset: preset, damping: options.damping)
+            let elapsed = max(0, timestamp - start)
+            let t = min(1, elapsed / max(0.01, duration))
+            let p: Double
+            if usePhysics {
+                // Analytic second-order step response. Unlike an easing curve, this models
+                // inertia + damping and can overshoot naturally without an arbitrary keyframe.
+                let zeta = physicsDamping
+                let wd = physicsOmega * sqrt(max(0.0001, 1 - zeta * zeta))
+                let envelope = exp(-zeta * physicsOmega * elapsed)
+                let response = 1 - envelope * (cos(wd * elapsed) + (zeta / sqrt(max(0.0001, 1 - zeta * zeta))) * sin(wd * elapsed))
+                p = min(1.035, max(0, response))
+            } else {
+                p = SurfaceMotion.progress(t, transition: transition, preset: preset, damping: options.damping)
+            }
             let width = max(1, initial.width + (target.width - initial.width) * p)
             let height = max(1, initial.height + (target.height - initial.height) * p)
             let centerX = initial.midX + (target.midX - initial.midX) * p
@@ -726,6 +770,7 @@ final class SurfaceAnimator {
 
             if t >= 1 {
                 self.clock.stop()
+                HaloMotionFeedback.settle(opening: opening)
                 completion?()
             }
         }
