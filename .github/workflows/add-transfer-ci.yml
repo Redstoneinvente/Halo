@@ -22,38 +22,66 @@ jobs:
           python3 <<'PY'
           from pathlib import Path
 
+          def indent_of(line):
+              return line[:len(line) - len(line.lstrip())]
+
           closed = Path('Halo/Views/ClosedNotchView.swift')
-          s = closed.read_text()
-          old = '''        if itemStyle.fontSize != nil {
-              value.clock.automaticTypography = false
-          }
-          '''
-          new = '''        // Closed-notch sizing is authoritative, whether it comes from the
-          // global closed-notch font size or a widget-specific override.
-          value.clock.automaticTypography = false
-          '''
-          if s.count(old) != 1:
-              raise SystemExit(f'ClosedNotchView expected one typography gate, found {s.count(old)}')
-          closed.write_text(s.replace(old, new, 1))
+          lines = closed.read_text().splitlines(keepends=True)
+          replacements = 0
+          out = []
+          i = 0
+          while i < len(lines):
+              if (
+                  i + 2 < len(lines)
+                  and lines[i].strip() == 'if itemStyle.fontSize != nil {'
+                  and lines[i + 1].strip() == 'value.clock.automaticTypography = false'
+                  and lines[i + 2].strip() == '}'
+              ):
+                  indent = indent_of(lines[i])
+                  out.append(indent + '// Closed-notch sizing is authoritative, whether it comes from the\n')
+                  out.append(indent + '// global closed-notch font size or a widget-specific override.\n')
+                  out.append(indent + 'value.clock.automaticTypography = false\n')
+                  replacements += 1
+                  i += 3
+                  continue
+              out.append(lines[i])
+              i += 1
+          if replacements != 1:
+              raise SystemExit(f'ClosedNotchView expected one typography gate, found {replacements}')
+          closed.write_text(''.join(out))
 
           manager = Path('Halo/NotchEngine/WindowManager.swift')
-          s = manager.read_text()
-
-          old = '                if style.fontSize != nil { clock.automaticTypography = false }'
-          new = '                clock.automaticTypography = false'
-          if s.count(old) != 1:
-              raise SystemExit(f'WindowManager preferred-height gate expected once, found {s.count(old)}')
-          s = s.replace(old, new, 1)
-
-          old = '''                if closedClockStyle.fontSize != nil {
-                      style.clock.automaticTypography = false
-                  }
-          '''
-          new = '''                style.clock.automaticTypography = false
-          '''
-          if s.count(old) != 1:
-              raise SystemExit(f'WindowManager dynamic-width gate expected once, found {s.count(old)}')
-          manager.write_text(s.replace(old, new, 1))
+          lines = manager.read_text().splitlines(keepends=True)
+          single_replacements = 0
+          block_replacements = 0
+          out = []
+          i = 0
+          while i < len(lines):
+              stripped = lines[i].strip()
+              if stripped == 'if style.fontSize != nil { clock.automaticTypography = false }':
+                  indent = indent_of(lines[i])
+                  out.append(indent + 'clock.automaticTypography = false\n')
+                  single_replacements += 1
+                  i += 1
+                  continue
+              if (
+                  i + 2 < len(lines)
+                  and stripped == 'if closedClockStyle.fontSize != nil {'
+                  and lines[i + 1].strip() == 'style.clock.automaticTypography = false'
+                  and lines[i + 2].strip() == '}'
+              ):
+                  indent = indent_of(lines[i])
+                  out.append(indent + 'style.clock.automaticTypography = false\n')
+                  block_replacements += 1
+                  i += 3
+                  continue
+              out.append(lines[i])
+              i += 1
+          if single_replacements != 1:
+              raise SystemExit(f'WindowManager preferred-height gate expected once, found {single_replacements}')
+          if block_replacements != 1:
+              raise SystemExit(f'WindowManager dynamic-width gate expected once, found {block_replacements}')
+          manager.write_text(''.join(out))
           PY
 
       - name: Parse changed Swift files
@@ -63,7 +91,7 @@ jobs:
 
       - name: Restore workflow and push fix
         run: |
-          git checkout HEAD^ -- .github/workflows/add-transfer-ci.yml
+          git checkout 67d75755c5319540ac18968e4a560d3502886c42 -- .github/workflows/add-transfer-ci.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add Halo/Views/ClosedNotchView.swift Halo/NotchEngine/WindowManager.swift .github/workflows/add-transfer-ci.yml
