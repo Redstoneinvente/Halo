@@ -33,30 +33,22 @@ jobs:
                   'HStack(spacing: elementSpacing) { standardElements }\n            .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: .center)'
               ),
               (
-                  '''                // Give the compact clock the exact slot proposal. Its internal compact
-                // layout can now shrink as a last resort when the display edge prevents
-                // the notch from growing any farther.
-                .frame(
-                    width: CGFloat(widgetContentWidth),
-                    height: CGFloat(widgetContentHeight)
-                )
-                .clipped()''',
-                  '''                // Keep the clock centered inside the adaptive slot while allowing
-                // its real typography to grow with the configured widget text size.
-                .frame(
-                    maxWidth: CGFloat(widgetContentWidth),
-                    maxHeight: CGFloat(widgetContentHeight),
-                    alignment: .center
-                )
-                .clipped()'''
+                  '                .frame(\n                    width: CGFloat(widgetContentWidth),\n                    height: CGFloat(widgetContentHeight)\n                )\n                .clipped()',
+                  '                .frame(\n                    maxWidth: CGFloat(widgetContentWidth),\n                    maxHeight: CGFloat(widgetContentHeight),\n                    alignment: .center\n                )\n                .clipped()'
               ),
           ]
 
           for old, new in replacements:
               count = s.count(old)
               if count != 1:
-                  raise SystemExit(f'Expected exactly one match, found {count}: {old[:90]!r}')
+                  raise SystemExit(f'Expected exactly one match, found {count}: {old[:100]!r}')
               s = s.replace(old, new, 1)
+
+          s = s.replace(
+              '// Give the compact clock the exact slot proposal. Its internal compact\n                // layout can now shrink as a last resort when the display edge prevents\n                // the notch from growing any farther.',
+              '// Keep the clock centered inside the adaptive slot while allowing\n                // its real typography to grow with the configured widget text size.',
+              1
+          )
 
           p.write_text(s)
           PY
@@ -69,9 +61,10 @@ jobs:
           git checkout 2eca2ecf159159cd301bd14e5094a638b0df1fbe -- .github/workflows/add-transfer-ci.yml .github/workflows/apply-micro-widget-design.yml .github/micro-widget-design-trigger.txt
           rm -f .github/workflows/fix-closed-notch-widget-layout.yml
           rm -f .github/fix-closed-notch-widget-layout-trigger.txt
+          rm -f .github/closed-notch-active-trigger.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Halo/Views/ClosedNotchView.swift .github/workflows/add-transfer-ci.yml .github/workflows/apply-micro-widget-design.yml .github/micro-widget-design-trigger.txt .github/workflows/fix-closed-notch-widget-layout.yml .github/fix-closed-notch-widget-layout-trigger.txt
+          git add Halo/Views/ClosedNotchView.swift .github/workflows/add-transfer-ci.yml .github/workflows/apply-micro-widget-design.yml .github/micro-widget-design-trigger.txt .github/workflows/fix-closed-notch-widget-layout.yml .github/fix-closed-notch-widget-layout-trigger.txt .github/closed-notch-active-trigger.txt
           git commit -m 'Fix closed notch widget centering and scaling'
           git push origin HEAD:main
 
