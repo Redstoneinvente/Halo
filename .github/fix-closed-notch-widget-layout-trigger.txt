@@ -1,2 +1,0 @@
-Apply the closed notch widget centering and scaling fix.
-retry=1

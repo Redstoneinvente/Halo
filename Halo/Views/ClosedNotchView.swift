@@ -634,7 +634,7 @@ struct ClosedNotchSlot: View {
         .font(.system(size: textSize, weight: itemFontWeight))
         .minimumScaleFactor(0.65)
         .foregroundStyle(effectiveTextColor)
-        .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
+        .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: .center)
         .padding(.vertical, layoutMetrics.verticalPadding)
         .padding(side == .left ? .trailing : .leading, slotCameraInset)
         .padding(side == .left ? .leading : .trailing, slotOuterInset)
@@ -643,7 +643,7 @@ struct ClosedNotchSlot: View {
     }
     private var standardRow: some View {
         HStack(spacing: elementSpacing) { standardElements }
-            .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: side == .left ? .trailing : .leading)
+            .frame(maxWidth: .infinity, maxHeight: innerHeight, alignment: .center)
     }
     private var hudOnlyRow: some View {
         HStack(spacing: 0) { hudElement }
@@ -716,12 +716,12 @@ struct ClosedNotchSlot: View {
             WidgetClock(style: compactClock, compact: true)
                 .environment(\.openNotchAvailableWidth, CGFloat(widgetContentWidth))
                 .environment(\.openNotchAvailableHeight, CGFloat(widgetContentHeight))
-                // Give the compact clock the exact slot proposal. Its internal compact
-                // layout can now shrink as a last resort when the display edge prevents
-                // the notch from growing any farther.
+                // Keep the clock centered inside the adaptive slot while allowing
+                // its real typography to grow with the configured widget text size.
                 .frame(
-                    width: CGFloat(widgetContentWidth),
-                    height: CGFloat(widgetContentHeight)
+                    maxWidth: CGFloat(widgetContentWidth),
+                    maxHeight: CGFloat(widgetContentHeight),
+                    alignment: .center
                 )
                 .clipped()
 
