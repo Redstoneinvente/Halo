@@ -8562,49 +8562,194 @@ private struct LauncherFavoriteApplicationsSheet: View {
 
 @MainActor
 private struct LockScreenSettingsPane: View {
+    @AppStorage("HaloLockScreenEffectsEnabled") private var effectsEnabled = true
+    @AppStorage("HaloLockScreenLockAnimation") private var lockAnimation = "retract"
+    @AppStorage("HaloLockScreenLockDuration") private var lockDuration = 0.24
+    @AppStorage("HaloLockScreenLockSound") private var lockSound = "off"
+    @AppStorage("HaloLockScreenLockHaptic") private var lockHaptic = 0
+    @AppStorage("HaloLockScreenUnlockAnimation") private var unlockAnimation = "spring"
+    @AppStorage("HaloLockScreenUnlockDuration") private var unlockDuration = 0.32
+    @AppStorage("HaloLockScreenUnlockDelay") private var unlockDelay = 0.08
+    @AppStorage("HaloLockScreenUnlockSound") private var unlockSound = "off"
+    @AppStorage("HaloLockScreenUnlockHaptic") private var unlockHaptic = 0
+    @AppStorage("HaloLockScreenRestoreBehavior") private var restoreBehavior = "previous"
+    @AppStorage("HaloLockScreenRunActivationSequence") private var runActivationSequence = false
+
+    private let hapticLabels = ["Off", "Light", "Medium", "Strong", "Very Strong", "Intense", "Maximum"]
+
     var body: some View {
         Group {
-            Section("Lock Screen behavior") {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "lock.fill")
-                        .font(.title2)
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 28)
+            Section("Lock Screen customization") {
+                Toggle("Customize lock and unlock transitions", isOn: $effectsEnabled)
 
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Not shown while your Mac is locked")
-                            .font(.headline)
-                        Text("Halo follows the macOS secure session boundary. When the Lock Screen is active, Halo stays out of the secure interface and is not interactive there.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                Text("Halo customizes the handoff between your desktop session and the macOS Lock Screen. The secure Lock Screen itself remains owned by macOS.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("When locking") {
+                Picker("Animation", selection: $lockAnimation) {
+                    Text("Retract to notch").tag("retract")
+                    Text("Fade out").tag("fade")
+                    Text("Slide up").tag("slideUp")
+                    Text("Shrink away").tag("shrink")
+                    Text("Instant").tag("instant")
+                }
+
+                LabeledContent("Duration") {
+                    HStack(spacing: 10) {
+                        Slider(value: $lockDuration, in: 0.05...1.5, step: 0.05)
+                            .frame(width: 220)
+                        Text("\(lockDuration, specifier: "%.2f") s")
+                            .monospacedDigit()
+                            .frame(width: 58, alignment: .trailing)
                     }
                 }
-            }
+                .disabled(lockAnimation == "instant")
 
-            Section("After you unlock") {
-                Label("Halo resumes with your desktop session", systemImage: "lock.open.fill")
+                Picker("Sound", selection: $lockSound) {
+                    Text("Off").tag("off")
+                    Text("Soft tap").tag("soft")
+                    Text("Pop").tag("pop")
+                    Text("Glass").tag("glass")
+                }
+
+                LabeledContent("Haptic") {
+                    HStack(spacing: 10) {
+                        Slider(
+                            value: Binding(
+                                get: { Double(lockHaptic) },
+                                set: { lockHaptic = min(6, max(0, Int($0.rounded()))) }
+                            ),
+                            in: 0...6,
+                            step: 1
+                        )
+                        .frame(width: 220)
+                        Text(hapticLabels[min(6, max(0, lockHaptic))])
+                            .frame(width: 88, alignment: .trailing)
+                    }
+                }
+
+                Button("Preview lock transition") {
+                    NotificationCenter.default.post(
+                        name: .init("HaloPreviewLockScreenTransition"),
+                        object: nil,
+                        userInfo: ["phase": "lock"]
+                    )
+                }
+            }
+            .disabled(!effectsEnabled)
+
+            Section("After unlocking") {
+                Picker("Restore notch", selection: $restoreBehavior) {
+                    Text("Previous state").tag("previous")
+                    Text("Always closed").tag("closed")
+                    Text("Always open").tag("open")
+                }
+
+                Picker("Animation", selection: $unlockAnimation) {
+                    Text("Spring back").tag("spring")
+                    Text("Fade in").tag("fade")
+                    Text("Slide down").tag("slideDown")
+                    Text("Scale up").tag("scaleUp")
+                    Text("Instant").tag("instant")
+                }
+
+                LabeledContent("Delay") {
+                    HStack(spacing: 10) {
+                        Slider(value: $unlockDelay, in: 0...2, step: 0.05)
+                            .frame(width: 220)
+                        Text(unlockDelay < 0.01 ? "None" : "\(unlockDelay, specifier: "%.2f") s")
+                            .monospacedDigit()
+                            .frame(width: 58, alignment: .trailing)
+                    }
+                }
+
+                LabeledContent("Duration") {
+                    HStack(spacing: 10) {
+                        Slider(value: $unlockDuration, in: 0.05...1.5, step: 0.05)
+                            .frame(width: 220)
+                        Text("\(unlockDuration, specifier: "%.2f") s")
+                            .monospacedDigit()
+                            .frame(width: 58, alignment: .trailing)
+                    }
+                }
+                .disabled(unlockAnimation == "instant")
+
+                Picker("Sound", selection: $unlockSound) {
+                    Text("Off").tag("off")
+                    Text("Soft tap").tag("soft")
+                    Text("Pop").tag("pop")
+                    Text("Glass").tag("glass")
+                }
+
+                LabeledContent("Haptic") {
+                    HStack(spacing: 10) {
+                        Slider(
+                            value: Binding(
+                                get: { Double(unlockHaptic) },
+                                set: { unlockHaptic = min(6, max(0, Int($0.rounded()))) }
+                            ),
+                            in: 0...6,
+                            step: 1
+                        )
+                        .frame(width: 220)
+                        Text(hapticLabels[min(6, max(0, unlockHaptic))])
+                            .frame(width: 88, alignment: .trailing)
+                    }
+                }
+
+                Toggle("Play Activation Sequence after unlock", isOn: $runActivationSequence)
+
+                Button("Preview unlock transition") {
+                    NotificationCenter.default.post(
+                        name: .init("HaloPreviewLockScreenTransition"),
+                        object: nil,
+                        userInfo: ["phase": "unlock"]
+                    )
+                }
+            }
+            .disabled(!effectsEnabled)
+
+            Section("Security and system behavior") {
+                Label("Halo is hidden while the secure session is active", systemImage: "lock.shield.fill")
                     .font(.headline)
 
-                Text("Your Halo profile and settings stay intact while the Mac is locked. After you unlock and return to the desktop, Halo continues normally with the same configuration.")
+                Text("File drops, partner Context Interfaces, notch bubbles and other interactive Halo surfaces are suspended while the user session is inactive, then restored after unlock.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Label("Reduce Motion is respected automatically", systemImage: "figure.walk.motion")
+                    .font(.headline)
+
+                Text("When macOS Reduce Motion is enabled, Halo skips decorative lock and unlock motion while preserving the secure hide and restore behavior.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("Halo uses public NSWorkspace session notifications and does not replace loginwindow, inject into the Lock Screen, or use private APIs to force content above the secure interface.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Section("Secure by design") {
-                Label("Uses standard macOS app behavior", systemImage: "checkmark.shield.fill")
-                    .font(.headline)
-
-                Text("Halo does not replace the macOS Lock Screen, inject into the login process, or use private APIs to force its surface above the secure interface.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text("Lock Screen presentation is controlled by macOS, so Halo does not offer a switch to draw the notch surface over it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            Section {
+                Button("Reset Lock Screen customization") {
+                    effectsEnabled = true
+                    lockAnimation = "retract"
+                    lockDuration = 0.24
+                    lockSound = "off"
+                    lockHaptic = 0
+                    unlockAnimation = "spring"
+                    unlockDuration = 0.32
+                    unlockDelay = 0.08
+                    unlockSound = "off"
+                    unlockHaptic = 0
+                    restoreBehavior = "previous"
+                    runActivationSequence = false
+                }
             }
         }
     }
