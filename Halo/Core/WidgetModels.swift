@@ -2398,6 +2398,7 @@ struct ClosedMediaOptions: Codable, Equatable {
         if lyricChangeAnimation != nil { v.lyricChangeAnimation = resolvedLyricChangeAnimation }
         if lyricChangeAnimationDuration != nil { v.lyricChangeAnimationDuration = resolvedLyricChangeAnimationDuration }
         if changeAnimationDuration != nil { v.changeAnimationDuration = resolvedChangeAnimationDuration }
+        if artwork == .floating { v.artwork = .cover }
         return v
     }
 }
@@ -2420,10 +2421,12 @@ struct ClosedArtworkOptions: Codable, Equatable {
     var isArtworkOnly: Bool { artworkOnly ?? false }
     // Older profiles used mode == .background. New profiles can enable the background independently
     // while keeping mode set to cover or vinyl for foreground artwork.
+    var resolvedMode: MediaArtworkMode { mode == .floating ? .cover : mode }
     var usesBackgroundArtwork: Bool { backgroundEnabled ?? (mode == .background) }
     func validated() throws -> ClosedArtworkOptions {
         guard [size, padding, margin, vinylRPM, backgroundOpacity].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
+        v.mode = resolvedMode
         if v.mode == .none && !v.usesBackgroundArtwork { v.enabled = false }
         guard [coverBorder, coverTilt, coverGlow].compactMap({ $0 }).allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         v.coverBorder = coverBorder.map { min(0.18, max(0, $0)) }

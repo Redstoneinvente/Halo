@@ -8531,7 +8531,7 @@ private struct ContextMusicView: View {
     private func treatment(size: Double) -> ClosedArtworkOptions {
         var value = options.artworkTreatment ?? ClosedArtworkOptions()
         value.size = size
-        value.mode = options.resolvedForegroundArtwork == .floating ? .floating : .cover
+        value.mode = .cover
         return value
     }
     private var listeningStyle: ClosedNotchWidgetStyle { options.resolvedTopMusicStyle }

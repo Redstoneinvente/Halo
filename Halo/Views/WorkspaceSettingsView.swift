@@ -4941,20 +4941,17 @@ private struct ContextMusicSettings: View {
         }
 
         Section("Artwork layers") {
-            Picker("Foreground artwork", selection: foregroundArtwork) { ForEach(ContextArtworkPresentation.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+            Picker("Foreground artwork", selection: foregroundArtwork) { ForEach([ContextArtworkPresentation.none, .cover, .vinyl]) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
             Text("Foreground artwork is independent from the background. You can use the album cover as the background while still showing a square cover or spinning vinyl in front.").font(.caption).foregroundStyle(.secondary)
             if foregroundArtwork.wrappedValue != .none { Slider(value: options.artworkSize, in: 32...240) { Text("Foreground artwork size") } }
             if foregroundArtwork.wrappedValue == .vinyl { Slider(value: vinylRPM, in: 1...45) { Text("Vinyl rotation speed") } }
-            if foregroundArtwork.wrappedValue == .cover || foregroundArtwork.wrappedValue == .floating {
+            if foregroundArtwork.wrappedValue == .cover {
                 let treatment = Binding(get: { options.wrappedValue.artworkTreatment ?? ClosedArtworkOptions() }, set: { options.wrappedValue.artworkTreatment = $0 })
                 Picker("Cover treatment", selection: Binding(get: { treatment.wrappedValue.coverStyle ?? .clean }, set: { treatment.wrappedValue.coverStyle = $0 })) {
                     ForEach(AlbumCoverStyle.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
                 if (treatment.wrappedValue.coverStyle ?? .clean) != .clean {
                     PreciseSlider(title: "Frame thickness", value: Binding(get: { treatment.wrappedValue.coverBorder ?? 0.07 }, set: { treatment.wrappedValue.coverBorder = $0 }), range: 0...0.18, step: 0.01, decimals: 2)
-                }
-                if foregroundArtwork.wrappedValue == .floating {
-                    PreciseSlider(title: "Perspective", value: Binding(get: { treatment.wrappedValue.coverTilt ?? 16 }, set: { treatment.wrappedValue.coverTilt = $0 }), range: -30...30, step: 1, suffix: "°")
                 }
                 PreciseSlider(title: "Artwork glow", value: Binding(get: { treatment.wrappedValue.coverGlow ?? 0.35 }, set: { treatment.wrappedValue.coverGlow = $0 }), range: 0...1, step: 0.05, decimals: 2)
             }

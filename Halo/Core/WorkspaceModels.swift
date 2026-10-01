@@ -2085,7 +2085,7 @@ enum ContextMusicLayoutMode: String, Codable, CaseIterable, Identifiable {
 enum ContextArtworkPresentation: String, Codable, CaseIterable, Identifiable {
     case none, cover, vinyl, floating
     var id: String { rawValue }
-    var title: String { self == .floating ? "Floating 3D" : rawValue.capitalized }
+    var title: String { rawValue.capitalized }
 }
 
 enum ContextContentAlignment: String, Codable, CaseIterable, Identifiable {
@@ -2155,7 +2155,10 @@ struct ContextMusicOptions: Codable, Equatable {
     var topMargin: Double?
     var bottomMargin: Double?
     var resolvedLayoutMode: ContextMusicLayoutMode { layoutMode ?? .hero }
-    var resolvedForegroundArtwork: ContextArtworkPresentation { foregroundArtwork ?? (showArtwork ? .cover : .none) }
+    var resolvedForegroundArtwork: ContextArtworkPresentation {
+        let saved = foregroundArtwork ?? (showArtwork ? .cover : .none)
+        return saved == .floating ? .cover : saved
+    }
     var usesArtworkBackground: Bool { artworkBackground ?? false }
     var resolvedArtworkBackgroundBlur: Double { min(30, max(0, artworkBackgroundBlur ?? 12)) }
     var resolvedArtworkBackgroundDim: Double { min(0.9, max(0, artworkBackgroundDim ?? 0.38)) }

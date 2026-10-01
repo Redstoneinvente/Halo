@@ -1348,25 +1348,21 @@ struct ClosedNotchSettingsView: View {
                 Picker(
                     "Foreground style",
                     selection: Binding(
-                        get: { artwork.wrappedValue.mode == .floating ? .floating : (artwork.wrappedValue.mode == .vinyl ? .vinyl : .cover) },
+                        get: { artwork.wrappedValue.resolvedMode == .vinyl ? .vinyl : .cover },
                         set: { artwork.wrappedValue.mode = $0 }
                     )
                 ) {
                     Text("Album cover").tag(MediaArtworkMode.cover)
                     Text("Rotating vinyl").tag(MediaArtworkMode.vinyl)
-                    Text("Floating 3D").tag(MediaArtworkMode.floating)
                 }
                 .pickerStyle(.segmented)
 
-                if artwork.wrappedValue.mode != .vinyl {
+                if artwork.wrappedValue.resolvedMode != .vinyl {
                     Picker("Cover treatment", selection: Binding(get: { artwork.wrappedValue.coverStyle ?? .clean }, set: { artwork.wrappedValue.coverStyle = $0 })) {
                         ForEach(AlbumCoverStyle.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
                     if artwork.wrappedValue.coverStyle != nil && artwork.wrappedValue.coverStyle != .clean {
                     PreciseSlider(title: "Frame thickness", value: Binding(get: { artwork.wrappedValue.coverBorder ?? 0.07 }, set: { artwork.wrappedValue.coverBorder = $0 }), range: 0...0.18, step: 0.01, decimals: 2)
-                    }
-                    if artwork.wrappedValue.mode == .floating {
-                    PreciseSlider(title: "Perspective", value: Binding(get: { artwork.wrappedValue.coverTilt ?? 16 }, set: { artwork.wrappedValue.coverTilt = $0 }), range: -30...30, step: 1, suffix: "°")
                     }
                     PreciseSlider(title: "Artwork glow", value: Binding(get: { artwork.wrappedValue.coverGlow ?? 0.35 }, set: { artwork.wrappedValue.coverGlow = $0 }), range: 0...1, step: 0.05, decimals: 2)
                 }
