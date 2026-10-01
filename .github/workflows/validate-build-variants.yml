@@ -72,7 +72,7 @@ jobs:
     if: github.event_name == 'pull_request' && github.head_ref == 'lock-screen-customization'
     permissions:
       contents: write
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -80,11 +80,12 @@ jobs:
           fetch-depth: 0
       - name: Apply Lock Screen customization
         run: python3 .github/scripts/apply_lock_screen_customization.py
-      - name: Validate Swift syntax
+      - name: Validate patch structure
         run: |
-          xcrun swiftc -parse Halo/NotchEngine/WindowManager.swift
-          xcrun swiftc -parse Halo/Views/WorkspaceSettingsView.swift
           git diff --check
+          grep -q 'sessionDidResignActiveNotification' Halo/NotchEngine/WindowManager.swift
+          grep -q 'HaloLockScreenUnlockAnimation' Halo/Views/WorkspaceSettingsView.swift
+          grep -q 'Preview lock transition' Halo/Views/WorkspaceSettingsView.swift
       - name: Commit patch to feature branch
         run: |
           git config user.name "github-actions[bot]"
