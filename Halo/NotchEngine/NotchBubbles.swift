@@ -2495,10 +2495,14 @@ struct NotchBubblePolicyEngine {
 
         var grouped = sorted
         for group in settings.resolvedBubbleGroups {
+            // A group is configured to replace its selected bubbles, so it should be
+            // visible as soon as any one of those activities is requested. Require
+            // multiple configured members to avoid turning a single bubble into a group.
+            guard group.members.count > 1 else { continue }
             let members = grouped.filter { activity in
                 activity.kind != .appWindow && (group.members.contains(activity.id) || group.members.contains(activity.kind.rawValue))
             }
-            guard members.count > 1 else { continue }
+            guard !members.isEmpty else { continue }
             let memberIDs = Set(members.map(\.id))
             grouped.removeAll { memberIDs.contains($0.id) }
             grouped.append(NotchBubbleActivity(
@@ -2583,6 +2587,27 @@ struct BubbleRegistry {
         var activities = providers
             .filter { access.allows(bubble: $0.kind) }
             .compactMap { $0.activity(store: store, settings: effectiveSettings) }
+
+        if access.allows(bubble: .appShortcut), effectiveSettings.resolvedAppShortcutsEnabled {
+            activities.append(contentsOf: effectiveSettings.resolvedAppShortcuts.compactMap { shortcut in
+                guard NSRunningApplication.runningApplications(
+                    withBundleIdentifier: shortcut.bundleIdentifier
+                ).isEmpty else { return nil }
+                return NotchBubbleActivity(
+                    id: shortcut.id,
+                    kind: .appShortcut,
+                    sourceIdentifier: shortcut.bundleIdentifier,
+                    mode: .activeTask,
+                    priority: .normal,
+                    title: shortcut.displayTitle,
+                    subtitle: "Open app",
+                    icon: shortcut.resolvedSymbol,
+                    progress: nil,
+                    updatedAt: Date(),
+                    expiresAt: nil
+                )
+            })
+        }
 
         if access.allows(bubble: .appWindow),
            effectiveSettings.resolvedAppMinimizeBubblesEnabled {
@@ -4823,9 +4848,13 @@ private struct NotchBubbleView: View {
 
     private var appShortcutIcon: NSImage? {
         guard let shortcut = appShortcut else { return nil }
-        let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: shortcut.bundleIdentifier)
+        return appShortcutIcon(for: shortcut)
+    }
+
+    private func appShortcutIcon(for shortcut: NotchAppShortcut) -> NSImage? {
+        let applicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: shortcut.bundleIdentifier)
             ?? URL(fileURLWithPath: shortcut.applicationPath)
-        return NSWorkspace.shared.icon(forFile: url.path)
+        return NSWorkspace.shared.icon(forFile: applicationURL.path)
     }
 
     private func launchAppShortcut() {
@@ -4837,8 +4866,8 @@ private struct NotchBubbleView: View {
 
     private var appShortcutBubbleContent: some View {
         Group {
-            if let shortcut = appShortcut, let icon = appShortcutIcon, shortcut.customSymbol == nil {
-                Image(nsImage: icon).resizable().scaledToFit().padding(bubbleStyle.size * 0.18)
+            if let shortcut = appShortcut, let icon = appShortcutIcon(for: shortcut) {
+                Image(nsImage: icon).resizable().scaledToFit().padding(bubbleStyle.size * 0.12)
             } else {
                 Image(systemName: appShortcut?.resolvedSymbol ?? "app.fill")
                     .font(.system(size: bubbleStyle.size * 0.38, weight: .semibold))
@@ -5938,7 +5967,16 @@ private struct NotchBubbleView: View {
                 .font(.headline)
             ForEach(members) { member in
                 HStack(spacing: 9) {
-                    Image(systemName: member.icon).frame(width: 20)
+                    Group {
+                        if member.kind == .appShortcut,
+                           let shortcut = settings.resolvedAppShortcuts.first(where: { $0.id == member.id }),
+                           let icon = appShortcutIcon(for: shortcut) {
+                            Image(nsImage: icon).resizable().scaledToFit()
+                        } else {
+                            Image(systemName: member.icon)
+                        }
+                    }
+                    .frame(width: 20, height: 20)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(member.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                         if let subtitle = member.subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
@@ -6785,8 +6823,6 @@ struct NotchBubbleSettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(shortcut.appName).font(.subheadline.weight(.semibold))
                         TextField("Bubble label", text: appShortcutTitleBinding(shortcut.id))
-                            .textFieldStyle(.roundedBorder).frame(maxWidth: 220)
-                        TextField("SF Symbol override", text: appShortcutSymbolBinding(shortcut.id))
                             .textFieldStyle(.roundedBorder).frame(maxWidth: 220)
                     }
                     Spacer()

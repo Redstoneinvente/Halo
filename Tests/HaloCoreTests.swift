@@ -7,6 +7,81 @@ import AppKit
 #endif
 
 final class HaloCoreTests: XCTestCase {
+    func testBubbleGroupReplacesItsMembersWhenOneConfiguredActivityIsActive() {
+        let group = NotchBubbleGroup(
+            id: "group-test",
+            name: "Daily",
+            members: [NotchBubbleKind.timer.rawValue, NotchBubbleKind.music.rawValue]
+        )
+        var settings = NotchBubbleSettings()
+        settings.bubbleGroups = [group]
+        let timer = NotchBubbleActivity(
+            id: "timer.active",
+            kind: .timer,
+            sourceIdentifier: "timer",
+            mode: .activeTask,
+            priority: .normal,
+            title: "Timer",
+            subtitle: nil,
+            icon: "timer",
+            progress: nil,
+            updatedAt: Date(),
+            expiresAt: nil
+        )
+
+        let selected = NotchBubblePolicyEngine().select(
+            [timer],
+            settings: settings,
+            surfaceExpanded: false,
+            fullscreen: false,
+            suppressedKinds: []
+        )
+
+        XCTAssertEqual(selected.count, 1)
+        XCTAssertEqual(selected.first?.id, "group.group-test")
+        XCTAssertEqual(selected.first?.members?.map(\.id), ["timer.active"])
+    }
+
+    func testAppShortcutActivityCanBeGroupedByItsStableShortcutID() {
+        let shortcut = NotchAppShortcut(
+            bundleIdentifier: "com.example.music",
+            appName: "Music App",
+            applicationPath: "/Applications/Music App.app"
+        )
+        var settings = NotchBubbleSettings()
+        settings.appShortcutsEnabled = true
+        settings.appShortcuts = [shortcut]
+        settings.bubbleGroups = [NotchBubbleGroup(
+            id: "favorites",
+            name: "Favorites",
+            members: [shortcut.id, NotchBubbleKind.timer.rawValue]
+        )]
+        let shortcutActivity = NotchBubbleActivity(
+            id: shortcut.id,
+            kind: .appShortcut,
+            sourceIdentifier: shortcut.bundleIdentifier,
+            mode: .activeTask,
+            priority: .normal,
+            title: shortcut.displayTitle,
+            subtitle: "Open app",
+            icon: shortcut.resolvedSymbol,
+            progress: nil,
+            updatedAt: Date(),
+            expiresAt: nil
+        )
+
+        let selected = NotchBubblePolicyEngine().select(
+            [shortcutActivity],
+            settings: settings,
+            surfaceExpanded: false,
+            fullscreen: false,
+            suppressedKinds: []
+        )
+
+        XCTAssertEqual(selected.map(\.id), ["group.favorites"])
+        XCTAssertEqual(selected.first?.members?.first?.id, shortcut.id)
+    }
+
     func testDirectDistributionCapabilities() {
         let distribution = HaloDistribution.direct
 
