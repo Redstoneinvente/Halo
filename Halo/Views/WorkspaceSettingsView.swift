@@ -593,7 +593,7 @@ struct SettingsView: View {
                 HaloAccountLicenseSettingsView()
             }
         case "Lock Screen":
-            LockScreenSettingsPane()
+            LockScreenSettingsPane(store: store, workspace: workspace)
         case "Reviews":
             HaloReviewCenterView()
         case "Feedback & Support":
@@ -8562,6 +8562,8 @@ private struct LauncherFavoriteApplicationsSheet: View {
 
 @MainActor
 private struct LockScreenSettingsPane: View {
+    @ObservedObject var store: AppStore
+    @ObservedObject var workspace: WorkspaceStore
     @AppStorage("HaloLockScreenEffectsEnabled") private var effectsEnabled = true
     @AppStorage("HaloLockScreenLockAnimation") private var lockAnimation = "retract"
     @AppStorage("HaloLockScreenLockDuration") private var lockDuration = 0.24
@@ -8574,11 +8576,60 @@ private struct LockScreenSettingsPane: View {
     @AppStorage("HaloLockScreenUnlockHaptic") private var unlockHaptic = 0
     @AppStorage("HaloLockScreenRestoreBehavior") private var restoreBehavior = "previous"
     @AppStorage("HaloLockScreenRunActivationSequence") private var runActivationSequence = false
+    @AppStorage("HaloLockScreenPresenceEnabled") private var presenceEnabled = false
+    @AppStorage("HaloLockScreenPresencePriority") private var presencePriority = "music"
+    @AppStorage("HaloLockScreenPresenceMusic") private var presenceMusic = true
+    @AppStorage("HaloLockScreenPresenceTimer") private var presenceTimer = true
+    @AppStorage("HaloLockScreenPresenceStopwatch") private var presenceStopwatch = true
+    @AppStorage("HaloLockScreenPresenceActivities") private var presenceActivities = false
+    @AppStorage("HaloLockScreenPresenceArtwork") private var presenceArtwork = true
+    @AppStorage("HaloLockScreenPresenceMediaPrivacy") private var presenceMediaPrivacy = "details"
 
     private let hapticLabels = ["Off", "Light", "Medium", "Strong", "Very Strong", "Intense", "Maximum"]
 
     var body: some View {
         Group {
+            Section("Lock Screen Presence") {
+                Toggle("Show Halo status on the Lock Screen", isOn: $presenceEnabled)
+                    .onChange(of: presenceEnabled) { enabled in
+                        if enabled { workspace.enableNotifications() }
+                    }
+
+                if presenceEnabled {
+                    Picker("Priority", selection: $presencePriority) {
+                        Text("Music first").tag("music")
+                        Text("Timer first").tag("timer")
+                        Text("Live Activities first").tag("activity")
+                        Text("Stopwatch first").tag("stopwatch")
+                    }
+
+                    Toggle("Now Playing", isOn: $presenceMusic)
+                    if presenceMusic {
+                        Picker("Media privacy", selection: $presenceMediaPrivacy) {
+                            Text("Full details").tag("details")
+                            Text("Track title only").tag("title")
+                            Text("Hide track details").tag("hidden")
+                        }
+                        Toggle("Album artwork", isOn: $presenceArtwork)
+                            .disabled(presenceMediaPrivacy == "hidden")
+                    }
+
+                    Toggle("Active timer", isOn: $presenceTimer)
+                    Toggle("Stopwatch", isOn: $presenceStopwatch)
+                    Toggle("Live Activities", isOn: $presenceActivities)
+
+                    Button("Preview Lock Screen card") {
+                        workspace.enableNotifications()
+                        NotificationCenter.default.post(name: .init("HaloPreviewLockScreenPresence"), object: nil)
+                    }
+                }
+
+                Text("Halo uses a silent macOS notification for this card. macOS still controls whether Halo notifications are allowed to appear on the Lock Screen in System Settings. The card disappears when you unlock.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section("Lock Screen customization") {
                 Toggle("Customize lock and unlock transitions", isOn: $effectsEnabled)
 
@@ -8737,6 +8788,14 @@ private struct LockScreenSettingsPane: View {
 
             Section {
                 Button("Reset Lock Screen customization") {
+                    presenceEnabled = false
+                    presencePriority = "music"
+                    presenceMusic = true
+                    presenceTimer = true
+                    presenceStopwatch = true
+                    presenceActivities = false
+                    presenceArtwork = true
+                    presenceMediaPrivacy = "details"
                     effectsEnabled = true
                     lockAnimation = "retract"
                     lockDuration = 0.24
