@@ -1738,19 +1738,30 @@ struct WidgetCard<Content: View>: View {
             if let height = availableHeight {
                 let padding = CGFloat(fittedStyle.padding)
                 let innerHeight = max(1, height - padding * 2)
-                // Adaptation happens before this point. The scroll view is only a safety
-                // net: when content fits it has no scroll range, and when it does not fit
-                // the user can still reach every control instead of losing it to clipping.
-                ScrollView(.vertical) {
+                if fillsCell {
+                    // Pixel Pal is a canvas that must receive the cell's real dimensions.
+                    // A ScrollView proposes an unspecified height to GeometryReader-based
+                    // content, which can leave the face at its tiny ideal size in a large cell.
                     styledContent
-                        .frame(maxWidth: .infinity, minHeight: innerHeight, alignment: contentFrameAlignment)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: contentFrameAlignment)
+                        .padding(padding)
+                        .frame(width: availableWidth, height: max(0, height))
+                        .clipped()
+                } else {
+                    // Adaptation happens before this point. The scroll view is only a safety
+                    // net: when content fits it has no scroll range, and when it does not fit
+                    // the user can still reach every control instead of losing it to clipping.
+                    ScrollView(.vertical) {
+                        styledContent
+                            .frame(maxWidth: .infinity, minHeight: innerHeight, alignment: contentFrameAlignment)
+                    }
+                    .scrollIndicators(.hidden)
+                    .frame(maxWidth: .infinity, alignment: contentFrameAlignment)
+                    .frame(height: innerHeight, alignment: contentFrameAlignment)
+                    .padding(padding)
+                    .frame(height: max(0, height))
+                    .clipped()
                 }
-                .scrollIndicators(.hidden)
-                .frame(maxWidth: .infinity, alignment: contentFrameAlignment)
-                .frame(height: innerHeight, alignment: contentFrameAlignment)
-                .padding(padding)
-                .frame(height: max(0, height))
-                .clipped()
             } else {
                 styledContent
                     .frame(maxWidth: .infinity, minHeight: style.minimumHeight, alignment: contentOptions.alignment.alignment)
