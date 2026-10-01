@@ -1,4 +1,4 @@
-name: Surface Geometry Performance Hotfix
+name: Lock Screen Presence Delivery Repair
 
 on:
   push:
@@ -17,42 +17,58 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Remove synchronous geometry work from SwiftUI body
+      - name: Repair Lock Screen Presence delivery
         shell: python
         run: |
           from pathlib import Path
-          path = Path('Halo/Views/SurfaceAppearanceView.swift')
+          path = Path('Halo/NotchEngine/WindowManager.swift')
           text = path.read_text()
-          old = '''                if let screen {
-                      let geometry = WindowManager.geometry(screen: screen, theme: theme, appearance: appearance)
-                      Text("Effective closed size: \\(Int(geometry.compactWidth)) × \\(Int(geometry.compactHeight)) pt.").font(.caption)
-                      if geometry.attachedToNotch {
-                          Text("16 × 16 pt is allowed. The physical camera cutout stays unchanged; a positive vertical offset moves Halo below it.").font(.caption).foregroundStyle(.secondary)
-                      }
-                  }
-          '''
-          new = '''                if screen != nil {
-                      Text("Configured closed size: \\(Int(appearance.compactWidth)) × \\(Int(appearance.surface.compactHeight)) pt.")
-                          .font(.caption)
-                      Text("The physical camera cutout stays unchanged; a positive vertical offset moves Halo below it.")
-                          .font(.caption)
-                          .foregroundStyle(.secondary)
-                  }
-          '''
-          if old not in text:
-              raise SystemExit('Expected SurfaceAppearanceControls geometry block not found; refusing to patch.')
-          path.write_text(text.replace(old, new, 1))
 
-      - name: Build Halo
+          replacements = [
+              (
+                  '        refreshLockScreenPresenceIfNeeded(force: true)\n',
+                  '        // Schedule after macOS has completed the desktop -> secure-session handoff.\n        // The notification daemon owns the delayed request if Halo is suspended meanwhile.\n        refreshLockScreenPresenceIfNeeded(force: true, deliveryDelay: 1.0)\n',
+                  'initial delivery'
+              ),
+              (
+                  '''    private func refreshLockScreenPresenceIfNeeded(force: Bool = false, preview: Bool = false) {\n        let preferences = LockScreenPresencePreferences.current()\n        guard preferences.enabled else {\n            clearLockScreenPresence()\n            return\n        }\n        guard preview || lockScreenSessionSuspended else { return }\n\n        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in\n            let authorized = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional\n            guard authorized else { return }\n            Task { @MainActor [weak self] in\n                self?.deliverLockScreenPresence(preferences: preferences, force: force, preview: preview)\n            }\n        }\n    }\n\n    private func deliverLockScreenPresence(\n        preferences: LockScreenPresencePreferences,\n        force: Bool,\n        preview: Bool\n    ) {''',
+                  '''    private func refreshLockScreenPresenceIfNeeded(\n        force: Bool = false,\n        preview: Bool = false,\n        deliveryDelay: TimeInterval = 0\n    ) {\n        let preferences = LockScreenPresencePreferences.current()\n        guard preferences.enabled else {\n            clearLockScreenPresence()\n            return\n        }\n        guard preview || lockScreenSessionSuspended else { return }\n\n        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in\n            let authorized = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional\n            let lockScreenAllowed = settings.lockScreenSetting == .enabled\n            guard authorized, preview || lockScreenAllowed else { return }\n            Task { @MainActor [weak self] in\n                self?.deliverLockScreenPresence(\n                    preferences: preferences,\n                    force: force,\n                    preview: preview,\n                    deliveryDelay: deliveryDelay\n                )\n            }\n        }\n    }\n\n    private func deliverLockScreenPresence(\n        preferences: LockScreenPresencePreferences,\n        force: Bool,\n        preview: Bool,\n        deliveryDelay: TimeInterval\n    ) {''',
+                  'permission and delay flow'
+              ),
+              (
+                  '''        center.add(UNNotificationRequest(\n            identifier: Self.lockScreenPresenceNotificationID,\n            content: content,\n            trigger: nil\n        ))''',
+                  '''        let trigger: UNNotificationTrigger?\n        if deliveryDelay > 0 {\n            trigger = UNTimeIntervalNotificationTrigger(\n                timeInterval: max(0.1, deliveryDelay),\n                repeats: false\n            )\n        } else {\n            trigger = nil\n        }\n        center.add(UNNotificationRequest(\n            identifier: Self.lockScreenPresenceNotificationID,\n            content: content,\n            trigger: trigger\n        ))''',
+                  'notification trigger'
+              )
+          ]
+
+          for old, new, label in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+
+      - name: Parse WindowManager
+        run: xcrun swiftc -parse Halo/NotchEngine/WindowManager.swift
+
+      - name: Build Halo Direct
         run: |
           set -o pipefail
-          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build | xcpretty
+          xcodebuild -project Halo.xcodeproj -scheme "Halo Direct" -configuration "Debug Direct" -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
 
-      - name: Commit hotfix and remove one-shot workflow
+      - name: Build Halo App Store
         run: |
-          rm .github/workflows/perf-surface-geometry-hotfix.yml
+          set -o pipefail
+          xcodebuild -project Halo.xcodeproj -scheme "Halo App Store" -configuration "Debug App Store" -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+
+      - name: Commit repair and restore one-shot workflow
+        run: |
+          git show HEAD^:.github/workflows/perf-surface-geometry-hotfix.yml > .github/workflows/perf-surface-geometry-hotfix.yml
+          rm -f .github/LOCKSCREEN_FIX_BACKUP_REF.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Halo/Views/SurfaceAppearanceView.swift .github/workflows/perf-surface-geometry-hotfix.yml
-          git commit -m "Avoid synchronous geometry work in Surface settings"
+          git add Halo/NotchEngine/WindowManager.swift .github/workflows/perf-surface-geometry-hotfix.yml
+          git rm -f --ignore-unmatch .github/LOCKSCREEN_FIX_BACKUP_REF.txt
+          git commit -m "Fix Lock Screen Presence delivery timing"
           git push origin HEAD:main
