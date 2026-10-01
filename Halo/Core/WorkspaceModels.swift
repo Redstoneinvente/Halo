@@ -2083,9 +2083,9 @@ enum ContextMusicLayoutMode: String, Codable, CaseIterable, Identifiable {
 }
 
 enum ContextArtworkPresentation: String, Codable, CaseIterable, Identifiable {
-    case none, cover, vinyl
+    case none, cover, vinyl, floating
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    var title: String { self == .floating ? "Floating 3D" : rawValue.capitalized }
 }
 
 enum ContextContentAlignment: String, Codable, CaseIterable, Identifiable {
@@ -2125,6 +2125,9 @@ struct ContextMusicOptions: Codable, Equatable {
     var textColor = WidgetColor.white
     var layoutMode: ContextMusicLayoutMode?
     var foregroundArtwork: ContextArtworkPresentation?
+    var artworkTreatment: ClosedArtworkOptions?
+    var showTopMusic: Bool?
+    var topMusicStyle: ClosedNotchWidgetStyle?
     var artworkBackground: Bool?
     var artworkBackgroundBlur: Double?
     var artworkBackgroundDim: Double?
@@ -2179,6 +2182,21 @@ struct ContextMusicOptions: Codable, Equatable {
     var resolvedHorizontalMargin: Double { min(120, max(0, horizontalMargin ?? max(18, resolvedSpacing * 1.25))) }
     var resolvedTopMargin: Double { min(160, max(0, topMargin ?? 0)) }
     var resolvedBottomMargin: Double { min(120, max(0, bottomMargin ?? max(10, resolvedSpacing * 0.55))) }
+    var resolvedTopMusicStyle: ClosedNotchWidgetStyle {
+        var value = topMusicStyle ?? ClosedNotchWidgetStyle()
+        if value.textColor == nil { value.textColor = textColor }
+        return value
+    }
+    var topMusicReservedHeight: Double {
+        guard showTopMusic == true else { return 0 }
+        let style = resolvedTopMusicStyle
+        let music = style.topMusic ?? TopMusicOptions()
+        let font = style.fontSize ?? 14
+        let chart = music.presentation == .chart ? (music.showValues ? 1.0 : 0) + (music.showArtist && music.grouping == .tracks ? 1.0 : 0) : 0
+        let content = font * 1.22 + chart * max(8, font * 0.7) * 1.22 + (chart > 0 ? 7 : 0)
+        let icon = style.layout == .stacked || style.layout == .stackedReversed ? (style.iconSize ?? font) + (style.spacing ?? 2) + style.resolvedIconPadding * 2 : 0
+        return max(36, content + icon + style.verticalPadding * 2 + 24)
+    }
     func validated() throws -> ContextMusicOptions {
         let numericValues: [Double] = [
             artworkSize,
@@ -2199,6 +2217,8 @@ struct ContextMusicOptions: Codable, Equatable {
         ]
         guard numericValues.allSatisfy({ $0.isFinite }) else { throw CocoaError(.fileReadCorruptFile) }
         var result = self
+        result.artworkTreatment = try artworkTreatment?.validated()
+        result.topMusicStyle = try topMusicStyle?.validated()
         result.artworkSize = min(240, max(32, artworkSize))
         result.fontSize = min(48, max(12, fontSize))
         result.backgroundOpacity = min(1, max(0, backgroundOpacity))
@@ -3862,7 +3882,7 @@ extension WorkspaceSettings {
 extension ContextMusicOptions {
     private enum HaloCodingKeys: String, CodingKey {
         case enabled, showArtwork, showTitle, showArtist, showControls, showVisualizer, artworkSize,
-             fontSize, background, backgroundOpacity, textColor, layoutMode, foregroundArtwork,
+             fontSize, background, backgroundOpacity, textColor, layoutMode, foregroundArtwork, artworkTreatment, showTopMusic, topMusicStyle,
              artworkBackground, artworkBackgroundBlur, artworkBackgroundDim, contentAlignment,
              spacing, cornerRadius, controlSize, vinylRPM, showLyrics, lyricDisplay, lyricSyncOffset,
              lyricsOnline, lyricFontSize, lyricTransition, lyricTransitionDuration, visualizerStyle,
@@ -3887,6 +3907,9 @@ extension ContextMusicOptions {
         textColor = c.haloDecode(WidgetColor.self, forKey: .textColor, default: fallback.textColor)
         layoutMode = c.haloOptional(ContextMusicLayoutMode.self, forKey: .layoutMode)
         foregroundArtwork = c.haloOptional(ContextArtworkPresentation.self, forKey: .foregroundArtwork)
+        artworkTreatment = c.haloOptional(ClosedArtworkOptions.self, forKey: .artworkTreatment)
+        showTopMusic = c.haloOptional(Bool.self, forKey: .showTopMusic)
+        topMusicStyle = c.haloOptional(ClosedNotchWidgetStyle.self, forKey: .topMusicStyle)
         artworkBackground = c.haloOptional(Bool.self, forKey: .artworkBackground)
         artworkBackgroundBlur = c.haloOptional(Double.self, forKey: .artworkBackgroundBlur)
         artworkBackgroundDim = c.haloOptional(Double.self, forKey: .artworkBackgroundDim)

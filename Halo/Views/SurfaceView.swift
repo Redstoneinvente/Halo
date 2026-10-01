@@ -8189,7 +8189,7 @@ private struct ContextMusicView: View {
     private var sizingKey: String {
         [options.resolvedLayoutMode.rawValue, options.resolvedForegroundArtwork.rawValue,
          String(options.artworkSize), String(options.showTitle), String(options.showArtist), String(options.showControls),
-         String(options.showVisualizer), String(options.showsLyrics), options.resolvedLyricDisplay.rawValue,
+         String(options.showVisualizer), String(options.showTopMusic ?? false), String(topMusicHeight), String(options.showsLyrics), options.resolvedLyricDisplay.rawValue,
          String(options.resolvedLyricFontSize), options.resolvedVisualizerStyle.rawValue,
          String(options.resolvedSpacing), String(options.resolvedControlSize), String(visualizerFullWidth),
          String(options.resolvedHorizontalMargin), String(options.resolvedTopMargin), String(options.resolvedBottomMargin),
@@ -8386,9 +8386,9 @@ private struct ContextMusicView: View {
         let controlsHeight = options.showControls ? options.resolvedControlSize * 1.35 : 0
         let visualizerHeight = options.showVisualizer ? max(18, min(64, visualizer.height)) : 0
         let artworkSize = options.resolvedForegroundArtwork == .none ? 0 : options.artworkSize
-        let activeBlocks = [metadataHeight, lyricsHeight, scrubHeight, controlsHeight, visualizerHeight].filter { $0 > 0 }.count
+        let activeBlocks = [metadataHeight, lyricsHeight, scrubHeight, controlsHeight, visualizerHeight, topMusicHeight].filter { $0 > 0 }.count
         let gaps = Double(max(0, activeBlocks - 1)) * spacing
-        let textColumn = metadataHeight + lyricsHeight + scrubHeight + controlsHeight + visualizerHeight + gaps
+        let textColumn = metadataHeight + lyricsHeight + scrubHeight + controlsHeight + visualizerHeight + topMusicHeight + gaps
         let innerHeight: Double
         let width: Double
         switch options.resolvedLayoutMode {
@@ -8458,6 +8458,7 @@ private struct ContextMusicView: View {
             scrubber
             controls
             visualizerView
+            topListened
             errorView
         }
         .frame(maxWidth: .infinity, alignment: frameAlignment)
@@ -8473,6 +8474,7 @@ private struct ContextMusicView: View {
                 scrubber
                 controls
                 visualizerView
+                topListened
                 errorView
             }
             .frame(maxWidth: .infinity, alignment: frameAlignment)
@@ -8489,6 +8491,7 @@ private struct ContextMusicView: View {
                 lyricsView
                 scrubber
                 visualizerView
+                topListened
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             controls
@@ -8505,6 +8508,7 @@ private struct ContextMusicView: View {
             scrubber
             controls
             visualizerView
+            topListened
         }
         .frame(maxWidth: .infinity, alignment: frameAlignment)
         .fixedSize(horizontal: false, vertical: true)
@@ -8515,19 +8519,34 @@ private struct ContextMusicView: View {
             switch options.resolvedForegroundArtwork {
             case .none:
                 EmptyView()
-            case .cover:
-                Group {
-                    if let activeArtwork { Image(nsImage: activeArtwork).resizable().scaledToFill() }
-                    else { artworkPlaceholder }
-                }
-                .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: min(options.resolvedCornerRadius, size * 0.18), style: .continuous))
-                .shadow(color: .black.opacity(0.28), radius: size * 0.055, y: size * 0.025)
+            case .cover, .floating:
+                AlbumCoverWidgetView(artwork: activeArtwork, options: treatment(size: size), palette: media.artworkColors, playing: media.isPlaying, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
             case .vinyl:
                 vinylArtwork(size: size)
             }
         }
         .id(options.resolvedForegroundArtwork.rawValue)
+    }
+
+    private func treatment(size: Double) -> ClosedArtworkOptions {
+        var value = options.artworkTreatment ?? ClosedArtworkOptions()
+        value.size = size
+        value.mode = options.resolvedForegroundArtwork == .floating ? .floating : .cover
+        return value
+    }
+    private var listeningStyle: ClosedNotchWidgetStyle { options.resolvedTopMusicStyle }
+    private var topMusicHeight: Double { options.topMusicReservedHeight }
+    @ViewBuilder private var topListened: some View {
+        if options.showTopMusic == true {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Top listened").font(.caption.weight(.semibold)).foregroundStyle(secondaryTextColor)
+                TopMusicWidgetView(style: listeningStyle, fontSize: listeningStyle.fontSize ?? 14)
+                    .foregroundStyle(listeningStyle.textColor?.color ?? primaryTextColor)
+                    .modifier(ClosedNotchWidgetChrome(style: listeningStyle, inheritedColor: primaryTextColor))
+            }
+            .frame(maxWidth: listeningStyle.width.map { CGFloat($0) } ?? .infinity, alignment: .leading)
+            .frame(height: topMusicHeight)
+        }
     }
 
     private func vinylArtwork(size: Double) -> some View {

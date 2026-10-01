@@ -1519,3 +1519,39 @@ final class MusicWidgetTests: XCTestCase {
         XCTAssertThrowsError(try invalid.validated())
     }
 }
+
+
+final class AudioCIMusicWidgetTests: XCTestCase {
+    func testLegacyPreferencesKeepArtworkAndNoRankings() throws {
+        let old = try JSONDecoder().decode(ContextMusicOptions.self, from: Data("{\"showArtwork\":true}".utf8))
+        XCTAssertEqual(old.resolvedForegroundArtwork, .cover)
+        XCTAssertNil(old.artworkTreatment)
+        XCTAssertEqual(old.topMusicReservedHeight, 0)
+    }
+    func testAudioPreferencesRoundTripWithSharedModels() throws {
+        var music = ContextMusicOptions()
+        music.foregroundArtwork = .floating
+        var treatment = ClosedArtworkOptions(); treatment.coverStyle = .jewel; treatment.coverTilt = -20
+        music.artworkTreatment = treatment
+        music.showTopMusic = true
+        var style = ClosedNotchWidgetStyle()
+        var rankings = TopMusicOptions(); rankings.metric = .plays; rankings.grouping = .artists; rankings.period = .month; rankings.presentation = .chart
+        style.topMusic = rankings; style.fontSize = 20; style.layout = .stacked
+        music.topMusicStyle = style
+        let validated = try music.validated()
+        XCTAssertEqual(try JSONDecoder().decode(ContextMusicOptions.self, from: JSONEncoder().encode(validated)), validated)
+        XCTAssertGreaterThan(validated.topMusicReservedHeight, 60)
+        music.showTopMusic = false
+        XCTAssertEqual(music.topMusicReservedHeight, 0)
+    }
+    func testNestedValidationRejectsBadNumbersAndClampsItemCounts() throws {
+        var music = ContextMusicOptions(); var treatment = ClosedArtworkOptions()
+        treatment.coverGlow = .infinity; music.artworkTreatment = treatment
+        XCTAssertThrowsError(try music.validated())
+        treatment.coverGlow = 4; music.artworkTreatment = treatment
+        var style = ClosedNotchWidgetStyle(); var ranking = TopMusicOptions(); ranking.count = 400; style.topMusic = ranking; music.topMusicStyle = style
+        let valid = try music.validated()
+        XCTAssertEqual(valid.artworkTreatment?.coverGlow, 1)
+        XCTAssertEqual(valid.topMusicStyle?.topMusic?.count, 5)
+    }
+}

@@ -4945,11 +4945,49 @@ private struct ContextMusicSettings: View {
             Text("Foreground artwork is independent from the background. You can use the album cover as the background while still showing a square cover or spinning vinyl in front.").font(.caption).foregroundStyle(.secondary)
             if foregroundArtwork.wrappedValue != .none { Slider(value: options.artworkSize, in: 32...240) { Text("Foreground artwork size") } }
             if foregroundArtwork.wrappedValue == .vinyl { Slider(value: vinylRPM, in: 1...45) { Text("Vinyl rotation speed") } }
+            if foregroundArtwork.wrappedValue == .cover || foregroundArtwork.wrappedValue == .floating {
+                let treatment = Binding(get: { options.wrappedValue.artworkTreatment ?? ClosedArtworkOptions() }, set: { options.wrappedValue.artworkTreatment = $0 })
+                Picker("Cover treatment", selection: Binding(get: { treatment.wrappedValue.coverStyle ?? .clean }, set: { treatment.wrappedValue.coverStyle = $0 })) {
+                    ForEach(AlbumCoverStyle.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                if (treatment.wrappedValue.coverStyle ?? .clean) != .clean {
+                    PreciseSlider(title: "Frame thickness", value: Binding(get: { treatment.wrappedValue.coverBorder ?? 0.07 }, set: { treatment.wrappedValue.coverBorder = $0 }), range: 0...0.18, step: 0.01, decimals: 2)
+                }
+                if foregroundArtwork.wrappedValue == .floating {
+                    PreciseSlider(title: "Perspective", value: Binding(get: { treatment.wrappedValue.coverTilt ?? 16 }, set: { treatment.wrappedValue.coverTilt = $0 }), range: -30...30, step: 1, suffix: "°")
+                }
+                PreciseSlider(title: "Artwork glow", value: Binding(get: { treatment.wrappedValue.coverGlow ?? 0.35 }, set: { treatment.wrappedValue.coverGlow = $0 }), range: 0...1, step: 0.05, decimals: 2)
+            }
             Toggle("Use album cover as background", isOn: artworkBackground)
             if artworkBackground.wrappedValue {
                 Slider(value: artworkBlur, in: 0...30) { Text("Artwork background blur") }
                 Slider(value: artworkDim, in: 0...0.9) { Text("Artwork background dim") }
                 Text("Album artwork is clipped to the context surface before blur/cropping, so enabling it cannot resize or overflow the notch.").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+
+        Section("Top listened") {
+            Toggle("Show listening rankings", isOn: boolBinding(\.showTopMusic, resolved: { $0.showTopMusic ?? false }))
+            if options.wrappedValue.showTopMusic == true {
+                let style = Binding(get: { options.wrappedValue.topMusicStyle ?? ClosedNotchWidgetStyle() }, set: { options.wrappedValue.topMusicStyle = $0 })
+                let rankings = Binding(get: { style.wrappedValue.topMusic ?? TopMusicOptions() }, set: { style.wrappedValue.topMusic = $0 })
+                Picker("Rank by", selection: rankings.metric) { ForEach(TopMusicMetric.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                Picker("Group", selection: rankings.grouping) { ForEach(TopMusicGrouping.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                Picker("Period", selection: rankings.period) { ForEach(TopMusicPeriod.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                Picker("Display", selection: rankings.presentation) { ForEach(TopMusicPresentation.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                if rankings.wrappedValue.presentation != .spotlight { Stepper("Items: \(rankings.wrappedValue.count)", value: rankings.count, in: 1...5) }
+                Toggle("Show totals", isOn: rankings.showValues)
+                Toggle("Show artist", isOn: rankings.showArtist)
+                Picker("Icon layout", selection: style.layout) { ForEach(ClosedNotchWidgetLayout.allCases) { Text($0.rawValue).tag($0) } }
+                PreciseSlider(title: "Text size", value: Binding(get: { style.wrappedValue.fontSize ?? 14 }, set: { style.wrappedValue.fontSize = $0 }), range: 8...30, step: 1, suffix: "pt")
+                ColorPicker("Ranking color", selection: Binding(get: { style.wrappedValue.textColor?.color ?? options.wrappedValue.textColor.color }, set: { style.wrappedValue.textColor = WidgetColor($0) }), supportsOpacity: false)
+                Picker("Font weight", selection: Binding(get: { style.wrappedValue.fontWeight ?? .semibold }, set: { style.wrappedValue.fontWeight = $0 })) { ForEach(WidgetFontWeight.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+                PreciseSlider(title: "Card width", value: Binding(get: { style.wrappedValue.width ?? 320 }, set: { style.wrappedValue.width = $0 }), range: 80...320, step: 1, suffix: "pt")
+                PreciseSlider(title: "Card padding", value: style.horizontalPadding, range: 0...24, step: 1, suffix: "pt")
+                PreciseSlider(title: "Card corners", value: style.cornerRadius, range: 0...32, step: 1, suffix: "pt")
+                Picker("Card background", selection: style.backgroundStyle) { ForEach(ClosedNotchWidgetBackgroundStyle.allCases) { Text($0.rawValue).tag($0) } }
+                PreciseSlider(title: "Card opacity", value: style.backgroundOpacity, range: 0...1, step: 0.05, decimals: 2)
+                Text("Uses the same locally observed history as the closed notch. Display preferences are saved independently with this Music CI profile.").font(.caption).foregroundStyle(.secondary)
             }
         }
 

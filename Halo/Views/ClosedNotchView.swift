@@ -93,7 +93,7 @@ private extension WidgetFontWeight {
     }
 }
 
-private struct ClosedNotchWidgetChrome: ViewModifier {
+struct ClosedNotchWidgetChrome: ViewModifier {
     let style: ClosedNotchWidgetStyle
     let inheritedColor: Color
 
@@ -758,7 +758,7 @@ struct ClosedNotchSlot: View {
             }
 
         case .topMusic:
-            TopMusicClosedView(style: itemStyle, fontSize: textSize)
+            TopMusicWidgetView(style: itemStyle, fontSize: textSize)
                 .frame(maxWidth: CGFloat(widgetContentWidth), maxHeight: CGFloat(widgetContentHeight)).clipped()
         case .media:
             if media.hasNowPlayingPresentation {
@@ -2689,7 +2689,7 @@ struct AlbumCoverWidgetView: View {
     }
 }
 
-private struct TopMusicClosedView: View {
+struct TopMusicWidgetView: View {
     let style: ClosedNotchWidgetStyle
     let fontSize: Double
     @ObservedObject private var history = MusicHistoryStore.shared
