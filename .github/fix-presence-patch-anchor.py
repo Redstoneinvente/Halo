@@ -8,3 +8,4 @@ if old not in text:
     raise SystemExit('Presence patch route anchor text not found')
 path.write_text(text.replace(old, new, 1))
 print('Presence patch route anchor corrected')
+# This helper is temporary and is removed before merge.
