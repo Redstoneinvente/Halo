@@ -78,6 +78,8 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
+      - name: Correct patch route anchor
+        run: python3 .github/fix-presence-patch-anchor.py
       - name: Apply source patch
         run: python3 .github/lock-screen-presence-patch.py
       - name: Validate patch
