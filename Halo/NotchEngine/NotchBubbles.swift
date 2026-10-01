@@ -155,18 +155,80 @@ struct NotchAppShortcut: Codable, Equatable, Identifiable {
     var bundleIdentifier: String
     var appName: String
     var applicationPath: String
+    var securityScopedBookmark: Data?
     var customTitle: String?
     var customSymbol: String?
     var id: String { "appShortcut." + bundleIdentifier }
     var displayTitle: String { customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? appName }
     var resolvedSymbol: String { customSymbol?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? "app.fill" }
 
-    init(bundleIdentifier: String, appName: String, applicationPath: String, customTitle: String? = nil, customSymbol: String? = nil) {
+    init(
+        bundleIdentifier: String,
+        appName: String,
+        applicationPath: String,
+        securityScopedBookmark: Data? = nil,
+        customTitle: String? = nil,
+        customSymbol: String? = nil
+    ) {
         self.bundleIdentifier = bundleIdentifier
         self.appName = appName
         self.applicationPath = applicationPath
+        self.securityScopedBookmark = securityScopedBookmark
         self.customTitle = customTitle
         self.customSymbol = customSymbol
+    }
+
+    static func fromApplicationURL(_ url: URL) -> NotchAppShortcut? {
+        let acquiredAccess = url.startAccessingSecurityScopedResource()
+        defer { if acquiredAccess { url.stopAccessingSecurityScopedResource() } }
+        guard let bundle = Bundle(url: url), let identifier = bundle.bundleIdentifier else { return nil }
+        let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
+            ?? url.deletingPathExtension().lastPathComponent
+        let bookmark = try? url.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        return NotchAppShortcut(
+            bundleIdentifier: identifier,
+            appName: name,
+            applicationPath: url.path,
+            securityScopedBookmark: bookmark
+        )
+    }
+
+    func withApplicationAccess<T>(_ operation: (URL) -> T) -> T? {
+        let applicationURL = resolvedApplicationURL()
+        let acquiredAccess = applicationURL.startAccessingSecurityScopedResource()
+        defer { if acquiredAccess { applicationURL.stopAccessingSecurityScopedResource() } }
+        return operation(applicationURL)
+    }
+
+    func openApplication() {
+        let applicationURL = resolvedApplicationURL()
+        let acquiredAccess = applicationURL.startAccessingSecurityScopedResource()
+        NSWorkspace.shared.openApplication(at: applicationURL, configuration: NSWorkspace.OpenConfiguration()) { _, _ in
+            if acquiredAccess { applicationURL.stopAccessingSecurityScopedResource() }
+        }
+    }
+
+    private func resolvedApplicationURL() -> URL {
+        let applicationURL: URL
+        var bookmarkIsStale = false
+        if let securityScopedBookmark,
+           let resolvedURL = try? URL(
+            resolvingBookmarkData: securityScopedBookmark,
+            options: [.withSecurityScope],
+            relativeTo: nil,
+            bookmarkDataIsStale: &bookmarkIsStale
+           ), !bookmarkIsStale {
+            applicationURL = resolvedURL
+        } else {
+            applicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
+                ?? URL(fileURLWithPath: applicationPath)
+        }
+        return applicationURL
     }
 }
 
@@ -706,10 +768,32 @@ struct NotchBubble: Identifiable, Equatable {
     let kind: NotchBubbleKind
     var placement: NotchBubblePlacement = .automatic
     var size: CGFloat
+    var containerWidth: CGFloat? = nil
+    var resolvedWidth: CGFloat { max(size, containerWidth ?? size) }
     var shape: NotchBubbleShape
     var isPersistent: Bool
     var timeout: TimeInterval?
     var priority: NotchBubblePriority
+}
+
+enum NotchBubbleGroupMetrics {
+    static let maximumInlineMembers = 5
+
+    static func visibleMemberCount(_ total: Int) -> Int {
+        min(max(0, total), maximumInlineMembers)
+    }
+
+    static func expandedWidth(baseSize: CGFloat, memberCount: Int) -> CGFloat {
+        guard memberCount > 0 else { return baseSize }
+        let visibleCount = visibleMemberCount(memberCount)
+        let itemCount = visibleCount + (memberCount > visibleCount ? 1 : 0)
+        let memberSize = max(20, min(30, baseSize * 0.62))
+        let gap = max(4, baseSize * 0.11)
+        let horizontalInset = max(6, baseSize * 0.17)
+        return baseSize + horizontalInset * 2 + gap
+            + CGFloat(itemCount) * memberSize
+            + CGFloat(max(0, itemCount - 1)) * gap
+    }
 }
 
 struct NotchBubbleSettings: Codable, Equatable {
@@ -878,7 +962,6 @@ struct NotchBubbleSettings: Codable, Equatable {
                     claimedMembers.insert(member)
                     return true
                 }.prefix(32))
-                guard !members.isEmpty else { return nil }
                 var result = group
                 result.name = String(group.name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(32))
                 if result.name.isEmpty { result.name = "Bubble Group" }
@@ -1165,10 +1248,57 @@ final class NotchBubbleActivityCenter: ObservableObject {
     @Published private(set) var transientActivities: [String: NotchBubbleActivity] = [:]
     @Published private(set) var suppressedKinds: Set<NotchBubbleKind> = []
     @Published private(set) var groupMembers: [String: [NotchBubbleActivity]] = [:]
+    @Published private(set) var expandedGroupIDs: Set<String> = []
 
     func setGroupMembers(_ groups: [String: [NotchBubbleActivity]]) {
-        guard groupMembers != groups else { return }
+        let activeGroupIDs = Set(groups.keys)
+        let retainedExpandedGroups = expandedGroupIDs.intersection(activeGroupIDs)
+        if retainedExpandedGroups != expandedGroupIDs {
+            expandedGroupIDs = retainedExpandedGroups
+        }
+        guard !Self.groupMembersAreVisuallyEquivalent(groupMembers, groups) else { return }
         groupMembers = groups
+    }
+
+    func toggleGroupExpansion(_ id: String) {
+        if expandedGroupIDs.contains(id) {
+            expandedGroupIDs.remove(id)
+        } else {
+            expandedGroupIDs.insert(id)
+        }
+    }
+
+    private static func groupMembersAreVisuallyEquivalent(
+        _ lhs: [String: [NotchBubbleActivity]],
+        _ rhs: [String: [NotchBubbleActivity]]
+    ) -> Bool {
+        guard lhs.keys == rhs.keys else { return false }
+        return lhs.allSatisfy { groupID, oldMembers in
+            guard let newMembers = rhs[groupID], oldMembers.count == newMembers.count else { return false }
+            return zip(oldMembers, newMembers).allSatisfy(activitiesAreVisuallyEquivalent)
+        }
+    }
+
+    private static func activitiesAreVisuallyEquivalent(
+        _ lhs: NotchBubbleActivity,
+        _ rhs: NotchBubbleActivity
+    ) -> Bool {
+        guard lhs.id == rhs.id,
+              lhs.kind == rhs.kind,
+              lhs.mode == rhs.mode,
+              lhs.priority == rhs.priority,
+              lhs.title == rhs.title,
+              lhs.subtitle == rhs.subtitle,
+              lhs.icon == rhs.icon,
+              lhs.progress == rhs.progress else { return false }
+
+        switch (lhs.members, rhs.members) {
+        case (nil, nil): return true
+        case let (left?, right?) where left.count == right.count:
+            return zip(left, right).allSatisfy(activitiesAreVisuallyEquivalent)
+        default:
+            return false
+        }
     }
 
     private var expiryTasks: [String: Task<Void, Never>] = [:]
@@ -2647,10 +2777,19 @@ struct BubbleRegistry {
 
         return selected.map { activity in
             let style = effectiveSettings.resolvedStyle(for: activity.kind)
+            let isExpandedGroup = activity.kind == .group
+                && runtime.expandedGroupIDs.contains(activity.id)
+            let containerWidth = isExpandedGroup
+                ? NotchBubbleGroupMetrics.expandedWidth(
+                    baseSize: style.size,
+                    memberCount: activity.members?.count ?? 0
+                )
+                : nil
             return NotchBubble(
                 id: [.appWindow, .appShortcut, .group].contains(activity.kind) ? activity.id : activity.kind.rawValue,
                 kind: activity.kind,
                 size: style.size,
+                containerWidth: containerWidth,
                 shape: style.shape,
                 isPersistent: activity.mode == .pinned,
                 timeout: activity.expiresAt?.timeIntervalSinceNow,
@@ -2692,11 +2831,11 @@ struct BubbleLayoutEngine {
             var currentWidth: CGFloat = 0
 
             for bubble in standardBubbles {
-                let addedWidth = bubble.size + (currentRow.isEmpty ? 0 : spacing)
+                let addedWidth = bubble.resolvedWidth + (currentRow.isEmpty ? 0 : spacing)
                 if !currentRow.isEmpty && currentWidth + addedWidth > availableWidth {
                     rows.append(currentRow)
                     currentRow = [bubble]
-                    currentWidth = bubble.size
+                    currentWidth = bubble.resolvedWidth
                 } else {
                     currentRow.append(bubble)
                     currentWidth += addedWidth
@@ -2709,17 +2848,31 @@ struct BubbleLayoutEngine {
             var yCursor = surfaceFrame.minY - gap - globalVerticalOffset
             for row in rows {
                 let rowHeight = row.map(\.size).max() ?? 0
-                let totalWidth = row.reduce(CGFloat.zero) { $0 + $1.size }
+                let totalWidth = row.reduce(CGFloat.zero) { $0 + $1.resolvedWidth }
                     + CGFloat(max(0, row.count - 1)) * spacing
                 var x = surfaceFrame.midX - totalWidth / 2
+                if let expandedGroupIndex = row.firstIndex(where: { $0.resolvedWidth > $0.size }) {
+                    let expandedGroup = row[expandedGroupIndex]
+                    // Keep the expandable group outside the physical notch footprint.
+                    // Grow it into the available side while the rest of its row shifts
+                    // with it, instead of centering the expanded capsule under the notch.
+                    let rightX = surfaceFrame.maxX + gap
+                    let leftX = surfaceFrame.minX - gap - expandedGroup.resolvedWidth
+                    x = rightX + expandedGroup.resolvedWidth <= screenFrame.maxX - 4
+                        ? rightX
+                        : max(screenFrame.minX + 4, leftX)
+                    x -= row.prefix(expandedGroupIndex).reduce(CGFloat.zero) {
+                        $0 + $1.resolvedWidth + spacing
+                    }
+                }
                 let rowY = yCursor - rowHeight
 
                 for bubble in row {
                     let style = settings.resolvedStyle(for: bubble.kind)
                     let y = rowY + (rowHeight - bubble.size) / 2 - style.verticalOffset
-                    let frame = CGRect(x: x, y: y, width: bubble.size, height: bubble.size)
+                    let frame = CGRect(x: x, y: y, width: bubble.resolvedWidth, height: bubble.size)
                     result[bubble.id] = clamped(frame, to: screenFrame)
-                    x += bubble.size + spacing
+                    x += bubble.resolvedWidth + spacing
                 }
 
                 yCursor = rowY - spacing
@@ -2732,6 +2885,7 @@ struct BubbleLayoutEngine {
             for bubble in standardBubbles {
                 let style = settings.resolvedStyle(for: bubble.kind)
                 let size = bubble.size
+                let width = bubble.resolvedWidth
                 let y = menuBarCenterY - size / 2 - globalVerticalOffset - style.verticalOffset
                 let side = sideAssignments[bubble.id]
                     ?? fallbackSide(for: settings.resolvedBubbleSideMode)
@@ -2740,21 +2894,21 @@ struct BubbleLayoutEngine {
                 switch side {
                 case .left:
                     frame = CGRect(
-                        x: surfaceFrame.minX - leftWingOffset - size,
+                        x: surfaceFrame.minX - leftWingOffset - width,
                         y: y,
-                        width: size,
+                        width: width,
                         height: size
                     )
-                    leftWingOffset += size + spacing
+                    leftWingOffset += width + spacing
 
                 case .right:
                     frame = CGRect(
                         x: surfaceFrame.maxX + rightWingOffset,
                         y: y,
-                        width: size,
+                        width: width,
                         height: size
                     )
-                    rightWingOffset += size + spacing
+                    rightWingOffset += width + spacing
                 }
 
                 result[bubble.id] = clamped(frame, to: screenFrame)
@@ -2765,11 +2919,15 @@ struct BubbleLayoutEngine {
             for bubble in standardBubbles {
                 let style = settings.resolvedStyle(for: bubble.kind)
                 let size = bubble.size
+                let width = bubble.resolvedWidth
                 yCursor -= size + style.verticalOffset
+                let x = bubble.resolvedWidth > bubble.size
+                    ? surfaceFrame.maxX + gap
+                    : surfaceFrame.midX - width / 2
                 let frame = CGRect(
-                    x: surfaceFrame.midX - size / 2,
+                    x: x,
                     y: yCursor,
-                    width: size,
+                    width: width,
                     height: size
                 )
                 result[bubble.id] = clamped(frame, to: screenFrame)
@@ -2847,11 +3005,11 @@ struct BubbleLayoutEngine {
             var currentWidth: CGFloat = 0
 
             for bubble in appBubbles {
-                let addedWidth = bubble.size + (currentRow.isEmpty ? 0 : spacing)
+                let addedWidth = bubble.resolvedWidth + (currentRow.isEmpty ? 0 : spacing)
                 if !currentRow.isEmpty && currentWidth + addedWidth > availableWidth {
                     rows.append(currentRow)
                     currentRow = [bubble]
-                    currentWidth = bubble.size
+                    currentWidth = bubble.resolvedWidth
                 } else {
                     currentRow.append(bubble)
                     currentWidth += addedWidth
@@ -2864,7 +3022,7 @@ struct BubbleLayoutEngine {
             var yCursor = startY
             for row in rows {
                 let rowHeight = row.map(\.size).max() ?? 0
-                let totalWidth = row.reduce(CGFloat.zero) { $0 + $1.size }
+                let totalWidth = row.reduce(CGFloat.zero) { $0 + $1.resolvedWidth }
                     + CGFloat(max(0, row.count - 1)) * spacing
                 var x = surfaceFrame.midX - totalWidth / 2
                 let rowY = yCursor - rowHeight
@@ -2872,9 +3030,9 @@ struct BubbleLayoutEngine {
                 for bubble in row {
                     let style = settings.resolvedStyle(for: bubble.kind)
                     let y = rowY + (rowHeight - bubble.size) / 2 - style.verticalOffset
-                    let frame = CGRect(x: x, y: y, width: bubble.size, height: bubble.size)
+                    let frame = CGRect(x: x, y: y, width: bubble.resolvedWidth, height: bubble.size)
                     result[bubble.id] = clamped(frame, to: screenFrame)
-                    x += bubble.size + spacing
+                    x += bubble.resolvedWidth + spacing
                 }
 
                 yCursor = rowY - spacing
@@ -4241,6 +4399,11 @@ private final class NotchBubbleDisplayHost {
             .sink { [weak self] _ in self?.refresh(animated: true) }
             .store(in: &subscriptions)
 
+        activityCenter.$expandedGroupIDs
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refresh(animated: true) }
+            .store(in: &subscriptions)
+
         minimizedWindowCenter.$entries
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
@@ -4640,6 +4803,8 @@ private struct NotchBubbleView: View {
     @State private var hovering = false
     @State private var showingDetail = false
     @State private var showingWindowPreview = false
+    @State private var selectedGroupMember: NotchBubbleActivity?
+    @State private var detailDismissedAt: Date?
     @State private var lastForceTouchAt: Date?
     @State private var lastNonZeroAudioVolume: Float = 0.5
 
@@ -4664,17 +4829,40 @@ private struct NotchBubbleView: View {
         settings.resolvedStyle(for: kind)
     }
 
+    private var groupMembers: [NotchBubbleActivity] {
+        activityCenter.groupMembers[activityID] ?? []
+    }
+
+    private var groupIsExpanded: Bool {
+        kind == .group && activityCenter.expandedGroupIDs.contains(activityID)
+    }
+
+    private var detailKind: NotchBubbleKind { selectedGroupMember?.kind ?? kind }
+    private var detailActivityID: String { selectedGroupMember?.id ?? activityID }
+
+    private var renderedBubbleWidth: CGFloat {
+        guard groupIsExpanded else { return bubbleStyle.size }
+        return NotchBubbleGroupMetrics.expandedWidth(
+            baseSize: bubbleStyle.size,
+            memberCount: groupMembers.count
+        )
+    }
+
+    private var renderedBubbleShape: NotchBubbleShape {
+        groupIsExpanded ? .capsule : bubbleStyle.shape
+    }
+
     var body: some View {
         bubbleContent
             .scaleEffect(bubbleStyle.contentScale)
-            .frame(width: bubbleStyle.size, height: bubbleStyle.size)
+            .frame(width: renderedBubbleWidth, height: bubbleStyle.size)
             .background { bubbleBackground }
             .clipShape(NotchBubbleMaskShape(
-                shape: bubbleStyle.shape,
+                shape: renderedBubbleShape,
                 cornerRadius: bubbleStyle.cornerRadius
             ))
             .contentShape(NotchBubbleMaskShape(
-                shape: bubbleStyle.shape,
+                shape: renderedBubbleShape,
                 cornerRadius: bubbleStyle.cornerRadius
             ))
             .overlay { bubbleBorder }
@@ -4692,8 +4880,9 @@ private struct NotchBubbleView: View {
                 hovering = value
                 updateInteractionProtection()
             }
-            .onChange(of: showingDetail) { _ in
+            .onChange(of: showingDetail) { isShowing in
                 updateInteractionProtection()
+                detailDismissedAt = isShowing ? nil : Date()
             }
             .onChange(of: showingWindowPreview) { _ in
                 updateInteractionProtection()
@@ -4742,6 +4931,7 @@ private struct NotchBubbleView: View {
                     .onEnded { result in
                         switch result {
                         case .first:
+                            guard kind != .group else { return }
                             let configuration = settings.doubleClickConfiguration(for: kind)
                             _ = performGestureAction(
                                 configuration.action,
@@ -4750,6 +4940,7 @@ private struct NotchBubbleView: View {
                                 hapticPattern: configuration.hapticPattern
                             )
                         case .second:
+                            guard kind != .group else { return }
                             handlePrimaryTap()
                             let override = settings.styleOverride(for: kind)
                             HaloHoverHaptics.pulse(
@@ -4770,7 +4961,7 @@ private struct NotchBubbleView: View {
                     Divider()
                     HStack {
                         Button("Dismiss current activity") {
-                            dismissCurrentActivity()
+                            dismissDetailActivity()
                             showingDetail = false
                         }
                         .buttonStyle(.borderless)
@@ -4795,8 +4986,15 @@ private struct NotchBubbleView: View {
                     }
             }
             .contextMenu {
-                Button("Dismiss current activity") {
-                    dismissCurrentActivity()
+                if kind == .group {
+                    Button(activityCenter.expandedGroupIDs.contains(activityID) ? "Hide Member Bubbles" : "Show Member Bubbles") {
+                        activityCenter.toggleGroupExpansion(activityID)
+                    }
+                    Button("Group Details") { showingDetail = true }
+                } else {
+                    Button("Dismiss current activity") {
+                        dismissCurrentActivity()
+                    }
                 }
             }
             .accessibilityLabel(kind.title)
@@ -4843,7 +5041,7 @@ private struct NotchBubbleView: View {
     }
 
     private var appShortcut: NotchAppShortcut? {
-        settings.resolvedAppShortcuts.first { $0.id == activityID }
+        settings.resolvedAppShortcuts.first { $0.id == detailActivityID }
     }
 
     private var appShortcutIcon: NSImage? {
@@ -4852,16 +5050,12 @@ private struct NotchBubbleView: View {
     }
 
     private func appShortcutIcon(for shortcut: NotchAppShortcut) -> NSImage? {
-        let applicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: shortcut.bundleIdentifier)
-            ?? URL(fileURLWithPath: shortcut.applicationPath)
-        return NSWorkspace.shared.icon(forFile: applicationURL.path)
+        shortcut.withApplicationAccess { NSWorkspace.shared.icon(forFile: $0.path) }
     }
 
     private func launchAppShortcut() {
         guard let shortcut = appShortcut else { return }
-        let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: shortcut.bundleIdentifier)
-            ?? URL(fileURLWithPath: shortcut.applicationPath)
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+        shortcut.openApplication()
     }
 
     private var appShortcutBubbleContent: some View {
@@ -4878,24 +5072,78 @@ private struct NotchBubbleView: View {
     }
 
     private var groupBubbleContent: some View {
-        let members = activityCenter.groupMembers[activityID] ?? []
-        return ZStack {
-            Circle().fill(providerAccentColor.opacity(0.22)).padding(bubbleStyle.size * 0.08)
-            Image(systemName: "square.stack.3d.up.fill")
-                .font(.system(size: bubbleStyle.size * 0.42, weight: .semibold))
-                .foregroundStyle(.white)
-            Text("\(members.count)")
-                .font(.system(size: max(9, bubbleStyle.size * 0.18), weight: .heavy, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 5).padding(.vertical, 2)
-                .background(providerAccentColor, in: Capsule())
-                .offset(x: bubbleStyle.size * 0.25, y: bubbleStyle.size * 0.25)
+        let members = groupMembers
+        let visibleCount = NotchBubbleGroupMetrics.visibleMemberCount(members.count)
+        let memberSize = max(20, min(30, bubbleStyle.size * 0.62))
+        let gap = max(4, bubbleStyle.size * 0.11)
+        let inset = max(6, bubbleStyle.size * 0.17)
+
+        return HStack(spacing: gap) {
+            ZStack {
+                Circle().fill(providerAccentColor.opacity(0.22)).padding(bubbleStyle.size * 0.08)
+                Image(systemName: "square.stack.3d.up.fill")
+                    .font(.system(size: bubbleStyle.size * 0.42, weight: .semibold))
+                    .foregroundStyle(.white)
+                Text("\(members.count)")
+                    .font(.system(size: max(9, bubbleStyle.size * 0.18), weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(providerAccentColor, in: Capsule())
+                    .offset(x: bubbleStyle.size * 0.25, y: bubbleStyle.size * 0.25)
+            }
+            .frame(width: bubbleStyle.size, height: bubbleStyle.size)
+            .contentShape(Circle())
+            .onTapGesture {
+                activityCenter.toggleGroupExpansion(activityID)
+                showingDetail = false
+            }
+
+            if groupIsExpanded {
+                ForEach(Array(members.prefix(visibleCount))) { member in
+                    groupMemberBubble(member, size: memberSize)
+                }
+
+                if members.count > visibleCount {
+                    Text("+\(members.count - visibleCount)")
+                        .font(.system(size: max(9, memberSize * 0.34), weight: .bold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .frame(width: memberSize, height: memberSize)
+                        .background(Color.white.opacity(0.14), in: Circle())
+                        .overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                }
+            }
         }
-        .accessibilityLabel("\(members.count) activities in group")
+        .padding(.horizontal, groupIsExpanded ? inset : 0)
+        .frame(width: renderedBubbleWidth, height: bubbleStyle.size, alignment: .leading)
+        .accessibilityLabel("\(members.count) activities in group. \(groupIsExpanded ? "Tap to hide" : "Tap to show") member bubbles")
+    }
+
+    @ViewBuilder
+    private func groupMemberBubble(_ member: NotchBubbleActivity, size: CGFloat) -> some View {
+        let memberColor = settings.resolvedStyle(for: member.kind).accent
+            ?? defaultAccentColor(for: member.kind)
+        Group {
+            if member.kind == .appShortcut,
+               let shortcut = settings.resolvedAppShortcuts.first(where: { $0.id == member.id }),
+               let icon = appShortcutIcon(for: shortcut) {
+                Image(nsImage: icon).resizable().scaledToFit().padding(size * 0.12)
+            } else {
+                Image(systemName: member.icon)
+                    .font(.system(size: size * 0.43, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: size, height: size)
+        .background(memberColor.opacity(0.3), in: Circle())
+        .overlay(Circle().stroke(Color.white.opacity(0.35), lineWidth: 1))
+        .clipShape(Circle())
+        .help(member.title)
+        .contentShape(Circle())
+        .onTapGesture { handleGroupedMemberTap(member) }
     }
 
     private var appWindowEntry: MinimizedWindowBubbleCenter.Entry? {
-        minimizedWindowCenter.entry(activityID: activityID)
+        minimizedWindowCenter.entry(activityID: detailActivityID)
     }
 
     @ViewBuilder
@@ -5626,39 +5874,32 @@ private struct NotchBubbleView: View {
         bubbleStyle.accent ?? defaultProviderAccentColor
     }
 
-    private var defaultProviderAccentColor: Color {
-        switch kind {
+    private func defaultAccentColor(for bubbleKind: NotchBubbleKind) -> Color {
+        switch bubbleKind {
         case .music, .vinyl:
             return media.artworkColors.first?.color ?? Color(red: 0.42, green: 0.48, blue: 1.0)
-        case .timer:
-            return store.finished ? .green : Color(red: 0.30, green: 0.62, blue: 1.0)
-        case .pixelPal:
-            return Color(red: 1.0, green: 0.42, blue: 0.66)
-        case .clock:
-            return Color(red: 0.34, green: 0.72, blue: 1.0)
-        case .stopwatch:
-            return Color(red: 1.0, green: 0.58, blue: 0.22)
-        case .system:
-            return Color(red: 0.33, green: 0.88, blue: 0.77)
-        case .clipboard:
-            return Color(red: 0.65, green: 0.46, blue: 1.0)
-        case .calendar:
-            return Color(red: 1.0, green: 0.34, blue: 0.38)
-        case .audio:
-            return Color(red: 0.26, green: 0.66, blue: 1.0)
-        case .files:
-            return Color(red: 0.32, green: 0.78, blue: 0.60)
-        case .appWindow, .appShortcut:
-            return Color(red: 0.36, green: 0.68, blue: 1.0)
-        case .group:
-            return Color(red: 0.67, green: 0.43, blue: 1.0)
+        case .timer: return store.finished ? .green : Color(red: 0.30, green: 0.62, blue: 1.0)
+        case .pixelPal: return Color(red: 1.0, green: 0.42, blue: 0.66)
+        case .clock: return Color(red: 0.34, green: 0.72, blue: 1.0)
+        case .stopwatch: return Color(red: 1.0, green: 0.58, blue: 0.22)
+        case .system: return Color(red: 0.33, green: 0.88, blue: 0.77)
+        case .clipboard: return Color(red: 0.65, green: 0.46, blue: 1.0)
+        case .calendar: return Color(red: 1.0, green: 0.34, blue: 0.38)
+        case .audio: return Color(red: 0.26, green: 0.66, blue: 1.0)
+        case .files: return Color(red: 0.32, green: 0.78, blue: 0.60)
+        case .appWindow, .appShortcut: return Color(red: 0.36, green: 0.68, blue: 1.0)
+        case .group: return Color(red: 0.67, green: 0.43, blue: 1.0)
         }
+    }
+
+    private var defaultProviderAccentColor: Color {
+        defaultAccentColor(for: kind)
     }
 
     @ViewBuilder
     private var bubbleBackground: some View {
         let shape = NotchBubbleMaskShape(
-            shape: bubbleStyle.shape,
+            shape: renderedBubbleShape,
             cornerRadius: bubbleStyle.cornerRadius
         )
         let accent = providerAccentColor
@@ -5856,7 +6097,7 @@ private struct NotchBubbleView: View {
     @ViewBuilder
     private var bubbleBorder: some View {
         let shape = NotchBubbleMaskShape(
-            shape: bubbleStyle.shape,
+            shape: renderedBubbleShape,
             cornerRadius: bubbleStyle.cornerRadius
         )
         let accent = providerAccentColor
@@ -5915,7 +6156,7 @@ private struct NotchBubbleView: View {
 
     @ViewBuilder
     private var detailView: some View {
-        switch kind {
+        switch detailKind {
         case .music:
             musicDetail
         case .timer:
@@ -5985,8 +6226,7 @@ private struct NotchBubbleView: View {
                     if member.kind == .appShortcut {
                         Button("Open") {
                             if let shortcut = settings.resolvedAppShortcuts.first(where: { $0.id == member.id }) {
-                                let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: shortcut.bundleIdentifier) ?? URL(fileURLWithPath: shortcut.applicationPath)
-                                NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+                                shortcut.openApplication()
                             }
                         }.buttonStyle(.borderless)
                     }
@@ -6033,7 +6273,7 @@ private struct NotchBubbleView: View {
                 }
 
                 Button("Restore Window") {
-                    _ = minimizedWindowCenter.restore(activityID: activityID)
+                    _ = minimizedWindowCenter.restore(activityID: detailActivityID)
                     activityCenter.clearDismissal(kind: .appWindow)
                     showingDetail = false
                 }
@@ -6220,7 +6460,7 @@ private struct NotchBubbleView: View {
     }
 
     private var detailWidth: CGFloat {
-        switch kind {
+        switch detailKind {
         case .music: return 310
         case .timer: return 330
         case .pixelPal: return 360
@@ -6454,6 +6694,11 @@ private struct NotchBubbleView: View {
     }
 
     private func handlePrimaryTap() {
+        if kind == .group {
+            activityCenter.toggleGroupExpansion(activityID)
+            showingDetail = false
+            return
+        }
         if kind == .appShortcut {
             launchAppShortcut()
             return
@@ -6487,6 +6732,91 @@ private struct NotchBubbleView: View {
         case .openPlayer:
             openMediaPlayer()
         }
+    }
+
+    private func handleGroupedMemberTap(_ member: NotchBubbleActivity) {
+        if !showingDetail,
+           selectedGroupMember != nil,
+           let detailDismissedAt,
+           Date().timeIntervalSince(detailDismissedAt) < 0.3 {
+            // SwiftUI can deliver the outside click to both the popover and the
+            // bubble underneath. Consume that same click instead of reopening.
+            selectedGroupMember = nil
+            return
+        }
+
+        if selectedGroupMember?.id == member.id {
+            if showingDetail {
+                closeGroupMemberDetail()
+                return
+            }
+            selectedGroupMember = nil
+        }
+
+        switch member.kind {
+        case .appShortcut:
+            if let shortcut = settings.resolvedAppShortcuts.first(where: { $0.id == member.id }) {
+                shortcut.openApplication()
+            }
+            closeGroupMemberDetail()
+        case .appWindow:
+            if minimizedWindowCenter.restore(activityID: member.id) {
+                activityCenter.clearDismissal(kind: .appWindow)
+            }
+            closeGroupMemberDetail()
+        case .music:
+            switch settings.resolvedMusicTapAction {
+            case .details:
+                selectedGroupMember = member
+                showingDetail = true
+            case .playPause:
+                mediaCommand("playpause")
+                closeGroupMemberDetail()
+            case .openNotch:
+                openNotch(for: .music)
+            case .openPlayer:
+                openMediaPlayer()
+                closeGroupMemberDetail()
+            }
+        case .group:
+            break
+        default:
+            selectedGroupMember = member
+            showingDetail = true
+        }
+    }
+
+    private func closeGroupMemberDetail() {
+        showingDetail = false
+        selectedGroupMember = nil
+    }
+
+    private func dismissDetailActivity() {
+        guard let selectedGroupMember else {
+            dismissCurrentActivity()
+            showingDetail = false
+            return
+        }
+
+        switch selectedGroupMember.kind {
+        case .appWindow:
+            minimizedWindowCenter.dismiss(activityID: selectedGroupMember.id)
+        case .appShortcut:
+            var next = settingsStore.settings
+            next.appShortcuts = (next.appShortcuts ?? []).filter { $0.id != selectedGroupMember.id }
+            next.bubbleGroups = next.bubbleGroups?.map { group in
+                var copy = group
+                copy.members.removeAll { $0 == selectedGroupMember.id }
+                return copy
+            }
+            settingsStore.settings = next.normalized()
+        case .group:
+            break
+        default:
+            activityCenter.dismiss(kind: selectedGroupMember.kind)
+        }
+        self.selectedGroupMember = nil
+        showingDetail = false
     }
 
     private func openMediaPlayer() {
@@ -6725,8 +7055,8 @@ private struct NotchBubbleView: View {
             .first?.localizedName ?? bundleID.split(separator: ".").last.map(String.init)
     }
 
-    private func openNotch() {
-        switch kind {
+    private func openNotch(for targetKind: NotchBubbleKind? = nil) {
+        switch targetKind ?? kind {
         case .music, .vinyl:
             let layout = surfaceState.layoutOverride ?? workspace.effectiveLayout
             let musicCI = layout.contextMusic ?? ContextMusicOptions()
@@ -8610,12 +8940,9 @@ struct NotchBubbleSettingsView: View {
         var next = settingsStore.settings
         var shortcuts = next.appShortcuts ?? []
         for url in panel.urls {
-            guard let bundle = Bundle(url: url), let identifier = bundle.bundleIdentifier else { continue }
-            let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
-                ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
-                ?? url.deletingPathExtension().lastPathComponent
-            if !shortcuts.contains(where: { $0.bundleIdentifier == identifier }) {
-                shortcuts.append(NotchAppShortcut(bundleIdentifier: identifier, appName: name, applicationPath: url.path))
+            guard let shortcut = NotchAppShortcut.fromApplicationURL(url) else { continue }
+            if !shortcuts.contains(where: { $0.bundleIdentifier == shortcut.bundleIdentifier }) {
+                shortcuts.append(shortcut)
             }
         }
         next.enabled = true

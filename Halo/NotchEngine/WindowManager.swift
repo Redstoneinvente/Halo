@@ -3754,7 +3754,6 @@ final class WindowManager {
                 }
                 host.state.appShortcutDragStateDidChange = { [weak self, weak host] active in
                     guard let host else { return }
-                    host.state.appShortcutDragActive = active
                     if !active, let target = host.appShortcutDragBaseTarget, let geometry = host.geometry {
                         host.appShortcutDragBaseTarget = nil
                         host.targetFrame = target
@@ -3785,13 +3784,7 @@ final class WindowManager {
                         )
                         : geometry.frame(expanded: false)
                     guard closedTarget.insetBy(dx: -20, dy: -12).contains(point) else { return false }
-                    let shortcuts = urls.compactMap { url -> NotchAppShortcut? in
-                        guard let bundle = Bundle(url: url), let bundleID = bundle.bundleIdentifier else { return nil }
-                        let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
-                            ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
-                            ?? url.deletingPathExtension().lastPathComponent
-                        return NotchAppShortcut(bundleIdentifier: bundleID, appName: name, applicationPath: url.path)
-                    }
+                    let shortcuts = urls.compactMap(NotchAppShortcut.fromApplicationURL)
                     guard shortcuts.count == urls.count, !shortcuts.isEmpty else { return false }
                     guard commit else { return true }
                     var saved = settings.resolvedAppShortcuts

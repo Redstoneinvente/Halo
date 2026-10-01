@@ -7,6 +7,16 @@ import AppKit
 #endif
 
 final class HaloCoreTests: XCTestCase {
+    func testEmptyBubbleGroupSurvivesNormalizationUntilConfigured() {
+        var settings = NotchBubbleSettings()
+        settings.bubbleGroups = [NotchBubbleGroup(id: "draft-group", name: "Favorites")]
+
+        let normalized = settings.normalized()
+
+        XCTAssertEqual(normalized.resolvedBubbleGroups.map(\.id), ["draft-group"])
+        XCTAssertTrue(normalized.resolvedBubbleGroups[0].members.isEmpty)
+    }
+
     func testBubbleGroupReplacesItsMembersWhenOneConfiguredActivityIsActive() {
         let group = NotchBubbleGroup(
             id: "group-test",
@@ -40,6 +50,41 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertEqual(selected.count, 1)
         XCTAssertEqual(selected.first?.id, "group.group-test")
         XCTAssertEqual(selected.first?.members?.map(\.id), ["timer.active"])
+    }
+
+    func testExpandedBubbleGroupUsesAHorizontalContainerForItsMembers() {
+        let collapsedWidth = NotchBubbleGroupMetrics.expandedWidth(baseSize: 42, memberCount: 0)
+        let twoMemberWidth = NotchBubbleGroupMetrics.expandedWidth(baseSize: 42, memberCount: 2)
+        let crowdedWidth = NotchBubbleGroupMetrics.expandedWidth(baseSize: 42, memberCount: 20)
+
+        XCTAssertEqual(collapsedWidth, 42)
+        XCTAssertGreaterThan(twoMemberWidth, collapsedWidth)
+        XCTAssertEqual(NotchBubbleGroupMetrics.visibleMemberCount(20), 5)
+        XCTAssertGreaterThan(crowdedWidth, twoMemberWidth)
+    }
+
+    func testExpandedBubbleGroupLayoutMovesCapsuleBesideTheNotch() {
+        let group = NotchBubble(
+            id: "group.favorites",
+            kind: .group,
+            size: 42,
+            containerWidth: 176,
+            shape: .glass,
+            isPersistent: true,
+            timeout: nil,
+            priority: .normal
+        )
+        var settings = NotchBubbleSettings()
+        settings.layout = .satellites
+        let surface = CGRect(x: 850, y: 850, width: 300, height: 50)
+        let screen = CGRect(x: 0, y: 0, width: 2000, height: 1000)
+
+        let frame = BubbleLayoutEngine().frames(
+            for: [group], around: surface, in: screen, compactHeight: 40, settings: settings
+        )[group.id]
+
+        XCTAssertEqual(frame?.width, 176)
+        XCTAssertGreaterThanOrEqual(frame?.minX ?? 0, surface.maxX)
     }
 
     func testAppShortcutActivityCanBeGroupedByItsStableShortcutID() {
