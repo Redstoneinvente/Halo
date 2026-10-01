@@ -2643,26 +2643,96 @@ struct AlbumCoverWidgetView: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion || lowPower || !playing || options.mode != .floating)) { timeline in
             let floating = options.mode == .floating
-            let phase = reduceMotion || lowPower || !playing ? 0 : sin(timeline.date.timeIntervalSinceReferenceDate * 1.2)
-            ZStack {
+            let time = timeline.date.timeIntervalSinceReferenceDate
+            let phase = reduceMotion || lowPower || !playing ? 0 : sin(time * 1.2)
+            Group {
                 if floating {
-                    RoundedRectangle(cornerRadius: size * 0.12).fill(tint.opacity(0.2))
-                        .frame(width: size * 0.75, height: size * 0.75)
-                        .rotation3DEffect(.degrees((options.coverTilt ?? 16) + 8), axis: (x: 0, y: 1, z: 0))
-                        .offset(x: size * 0.06, y: size * 0.06)
+                    floatingAlbumScene(phase: phase, time: time)
+                } else {
+                    ZStack {
+                        if treatment == .vinylPeek {
+                            VinylRecordView(artwork: artwork, size: size * 0.76, palette: palette, playing: playing, lowPower: lowPower, interactive: false)
+                                .offset(x: size * 0.12)
+                        }
+                        cover
+                            .frame(width: size * (treatment == .vinylPeek ? 0.76 : 1), height: size * (treatment == .vinylPeek ? 0.76 : 1))
+                            .shadow(color: tint.opacity(options.coverGlow ?? 0.35), radius: size * 0.1)
+                    }
                 }
-                if treatment == .vinylPeek {
-                    VinylRecordView(artwork: artwork, size: size * 0.76, palette: palette, playing: playing, lowPower: lowPower, interactive: false)
-                        .offset(x: size * 0.12)
-                }
-                cover
-                    .frame(width: size * (treatment == .vinylPeek ? 0.76 : (floating ? 0.82 : 1)), height: size * (treatment == .vinylPeek ? 0.76 : (floating ? 0.82 : 1)))
-                    .rotation3DEffect(.degrees(floating ? (options.coverTilt ?? 16) + phase * 5 : 0), axis: (x: 0.25, y: 1, z: 0), perspective: 0.5)
-                    .offset(x: treatment == .vinylPeek ? -size * 0.1 : 0, y: floating ? phase * size * 0.035 : 0)
-                    .shadow(color: tint.opacity(options.coverGlow ?? 0.35), radius: size * 0.1)
-            }.frame(width: size, height: size)
+            }
+            .frame(width: size, height: size)
         }
-        .accessibilityLabel(options.mode == .floating ? "Floating album artwork" : treatment.rawValue + " album artwork")
+        .accessibilityLabel(options.mode == .floating ? "Three dimensional album art with vinyl and floating particles" : treatment.rawValue + " album artwork")
+    }
+
+    private func floatingAlbumScene(phase: Double, time: Double) -> some View {
+        ZStack {
+            Circle()
+                .fill(RadialGradient(colors: [tint.opacity(0.38), tint.opacity(0.08), .clear], center: .center, startRadius: size * 0.05, endRadius: size * 0.5))
+                .frame(width: size * 1.05, height: size * 1.05)
+                .blur(radius: size * 0.06)
+
+            particleField(time: time)
+
+            VinylRecordView(artwork: artwork, size: size * 0.78, palette: palette, playing: playing, lowPower: lowPower, interactive: false)
+                .rotation3DEffect(.degrees(-8), axis: (x: 1, y: 0, z: 0), perspective: 0.65)
+                .offset(x: size * 0.17, y: size * 0.035 + phase * size * 0.025)
+                .shadow(color: .black.opacity(0.58), radius: size * 0.11, x: size * 0.04, y: size * 0.07)
+                .zIndex(1)
+
+            ForEach(0..<3, id: \.self) { layer in
+                RoundedRectangle(cornerRadius: size * 0.055)
+                    .fill(layer == 0 ? tint.opacity(0.24) : Color(red: 0.09, green: 0.10, blue: 0.15).opacity(0.96))
+                    .overlay(RoundedRectangle(cornerRadius: size * 0.055).stroke(.white.opacity(layer == 0 ? 0.48 : 0.17), lineWidth: max(0.5, size * 0.012)))
+                    .frame(width: size * 0.68, height: size * 0.68)
+                    .rotation3DEffect(.degrees((options.coverTilt ?? 16) + Double(layer) * 2), axis: (x: 0.12, y: 1, z: 0), perspective: 0.58)
+                    .offset(x: -size * 0.12 - Double(layer) * size * 0.025, y: size * 0.045 + Double(layer) * size * 0.018 + phase * size * 0.025)
+                    .shadow(color: tint.opacity((options.coverGlow ?? 0.35) * 0.26), radius: size * 0.045, x: -size * 0.02, y: size * 0.035)
+                    .zIndex(Double(3 - layer))
+            }
+
+            cover
+                .frame(width: size * 0.66, height: size * 0.66)
+                .overlay {
+                    RoundedRectangle(cornerRadius: treatment == .jewel ? size * 0.025 : size * 0.045)
+                        .stroke(LinearGradient(colors: [.white.opacity(0.88), .white.opacity(0.12), tint.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: max(0.7, size * 0.018))
+                        .allowsHitTesting(false)
+                }
+                .overlay {
+                    LinearGradient(colors: [.white.opacity(0.30), .white.opacity(0.035), .clear, .black.opacity(0.16)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        .clipShape(RoundedRectangle(cornerRadius: treatment == .jewel ? size * 0.025 : size * 0.045))
+                        .allowsHitTesting(false)
+                }
+                .rotation3DEffect(.degrees((options.coverTilt ?? 16) + phase * 3), axis: (x: 0.18, y: 1, z: 0), perspective: 0.58)
+                .offset(x: -size * 0.13, y: -size * 0.005 + phase * size * 0.025)
+                .shadow(color: .black.opacity(0.55), radius: size * 0.09, x: -size * 0.025, y: size * 0.06)
+                .zIndex(5)
+        }
+        .frame(width: size, height: size)
+        .rotation3DEffect(.degrees(phase * 1.6), axis: (x: 0.12, y: 1, z: 0), perspective: 0.72)
+    }
+
+    private func particleField(time: Double) -> some View {
+        Canvas { context, canvasSize in
+            let count = size < 48 ? 10 : 22
+            let colors = palette.prefix(3).map(\.color)
+            for index in 0..<count {
+                let seed = Double(index) * 2.399963229728653
+                let baseRadius = size * (0.29 + Double((index * 7) % 13) / 100)
+                let drift = playing && !reduceMotion && !lowPower ? sin(time * (0.7 + Double(index % 4) * 0.12) + seed) * size * 0.035 : 0
+                let angle = seed + (playing && !reduceMotion && !lowPower ? time * (index.isMultiple(of: 2) ? 0.10 : -0.08) : 0)
+                let point = CGPoint(x: canvasSize.width * 0.5 + cos(angle) * (baseRadius + drift), y: canvasSize.height * 0.5 + sin(angle) * (baseRadius * 0.74 + drift))
+                let diameter = max(1, size * (index.isMultiple(of: 5) ? 0.038 : 0.022))
+                let rect = CGRect(x: point.x - diameter * 0.5, y: point.y - diameter * 0.5, width: diameter, height: diameter)
+                let color = colors.isEmpty ? tint : colors[index % colors.count]
+                context.fill(Path(ellipseIn: rect), with: .color(color.opacity(index.isMultiple(of: 3) ? 0.9 : 0.58)))
+                if index.isMultiple(of: 5) {
+                    let flare = CGRect(x: point.x - diameter * 1.15, y: point.y - diameter * 0.28, width: diameter * 2.3, height: diameter * 0.56)
+                    context.fill(Path(roundedRect: flare, cornerRadius: diameter * 0.28), with: .color(.white.opacity(0.75)))
+                }
+            }
+        }
+        .allowsHitTesting(false)
     }
     private var cover: some View {
         GeometryReader { geometry in
