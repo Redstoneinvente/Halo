@@ -112,7 +112,7 @@ final class HaloFeatureAccess: ObservableObject {
         }
         if isFull { return true }
         switch bubble {
-        case .music, .timer, .audio:
+        case .music, .timer, .audio, .appShortcut, .group:
             return true
         case .pixelPal, .clock, .stopwatch, .system, .clipboard, .calendar, .vinyl, .files, .appWindow:
             return false

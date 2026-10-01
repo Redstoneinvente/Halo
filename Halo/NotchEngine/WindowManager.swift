@@ -468,6 +468,8 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     var dragStateHandler: ((Bool, [URL]) -> Bool)?
     var dragLocationHandler: ((CGPoint?) -> Void)?
     var dropHandler: (([URL]) -> Bool)?
+    var appShortcutDropHandler: (([URL], CGPoint, Bool) -> Bool)?
+    private var appShortcutDragURLs: [URL]?
 
     /// The normal Halo runtime remains the outer boundary for Halo's surface-wide drag source.
     /// Edition-specific drag restrictions, if any, belong in HaloFeatureAccess later.
@@ -511,6 +513,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             unregisterDraggedTypes()
             fileDragRegistered = false
             rejectSurfaceDrag()
+            appShortcutDragURLs = nil
             return
         }
         guard !fileDragRegistered else { return }
@@ -547,6 +550,12 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
         guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return [] }
         let urls = fileURLs(sender)
         guard !urls.isEmpty else { return super.draggingEntered(sender) }
+        if urls.allSatisfy({ $0.pathExtension.lowercased() == "app" }),
+           let point = dragScreenPoint(sender),
+           appShortcutDropHandler?(urls, point, false) == true {
+            appShortcutDragURLs = urls
+            return .copy
+        }
 
         // Classification/payload capture happens once on enter. draggingUpdated never rebuilds it.
         let claimed = dragStateHandler?(true, urls) ?? false
@@ -558,7 +567,21 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return [] }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); appShortcutDragURLs = nil; return [] }
+        if appShortcutDragURLs != nil { return .copy }
+        let candidateURLs = fileURLs(sender)
+        if candidateURLs.allSatisfy({ $0.pathExtension.lowercased() == "app" }),
+           !candidateURLs.isEmpty,
+           let point = dragScreenPoint(sender),
+           appShortcutDropHandler?(candidateURLs, point, false) == true {
+            if surfaceDragActive {
+                dragLocationHandler?(nil)
+                _ = dragStateHandler?(false, [])
+                surfaceDragActive = false
+            }
+            appShortcutDragURLs = candidateURLs
+            return .copy
+        }
         if surfaceDragActive {
             dragLocationHandler?(dragScreenPoint(sender))
             return .copy
@@ -567,7 +590,8 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); appShortcutDragURLs = nil; return }
+        if appShortcutDragURLs != nil { appShortcutDragURLs = nil; return }
         if surfaceDragActive {
             dragLocationHandler?(nil)
             _ = dragStateHandler?(false, [])
@@ -578,7 +602,12 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return false }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); appShortcutDragURLs = nil; return false }
+        if let urls = appShortcutDragURLs {
+            defer { appShortcutDragURLs = nil }
+            guard let point = dragScreenPoint(sender) else { return false }
+            return appShortcutDropHandler?(urls, point, true) ?? false
+        }
         guard surfaceDragActive else { return super.performDragOperation(sender) }
         let urls = fileURLs(sender)
         guard !urls.isEmpty else {
@@ -591,7 +620,8 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func concludeDragOperation(_ sender: NSDraggingInfo?) {
-        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); appShortcutDragURLs = nil; return }
+        if appShortcutDragURLs != nil { appShortcutDragURLs = nil; return }
         if surfaceDragActive {
             dragLocationHandler?(nil)
             _ = dragStateHandler?(false, [])
@@ -3693,6 +3723,30 @@ final class WindowManager {
                     }
 
                     return false
+                }
+                view.appShortcutDropHandler = { [weak host] urls, point, commit in
+                    guard let host, let geometry = host.geometry else { return false }
+                    let settingsStore = NotchBubbleSettingsStore.shared
+                    var settings = settingsStore.settings.normalized()
+                    guard geometry.frame(expanded: false).insetBy(dx: -12, dy: -8).contains(point) else { return false }
+                    let shortcuts = urls.compactMap { url -> NotchAppShortcut? in
+                        guard let bundle = Bundle(url: url), let bundleID = bundle.bundleIdentifier else { return nil }
+                        let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+                            ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
+                            ?? url.deletingPathExtension().lastPathComponent
+                        return NotchAppShortcut(bundleIdentifier: bundleID, appName: name, applicationPath: url.path)
+                    }
+                    guard shortcuts.count == urls.count, !shortcuts.isEmpty else { return false }
+                    guard commit else { return true }
+                    var saved = settings.resolvedAppShortcuts
+                    for shortcut in shortcuts where !saved.contains(where: { $0.bundleIdentifier == shortcut.bundleIdentifier }) {
+                        saved.append(shortcut)
+                    }
+                    settings.enabled = true
+                    settings.appShortcutsEnabled = true
+                    settings.appShortcuts = saved
+                    settingsStore.settings = settings.normalized()
+                    return true
                 }
                 host.panel.contentView = view
 

@@ -145,3 +145,10 @@ History is collected locally from the existing media service while Halo runs. It
 The built-in Music CI exposes the same album cover treatments under Context Notch Interface → Music CI → Artwork layers. Top listened can be enabled and customized in its own section, with shared ranking metrics, periods, grouping, presentations, counts and labels plus typography and card appearance. History is shared with the closed-notch widget; presentation settings are independent and saved in workspace profiles/themes. Rankings appear in Hero, Split, Compact and Minimal layouts, with a stable reserved height that responds to presentation changes. Older profiles retain their cover/vinyl choice and leave rankings disabled. This is a built-in presentation addition; the public `.haloCI` SDK schema and permissions are unchanged.
 
 Top listened now offers Featured favorite, Album gallery, and Cover strip presentations in both the closed notch and Audio CI. Album artwork and Colors from album can be toggled independently. Covers are saved locally as playback artwork arrives, with a maximum of 512 small thumbnails; tracks without a saved cover use colorful music tiles. Clearing listening history also clears these saved covers. Artist rankings use the cover of their leading track for the selected metric.
+
+
+## App shortcut bubbles and groups
+
+Enable Notch Bubbles, then add an app under **App Shortcuts** or drag its `.app` from Finder onto the notch. A shortcut appears only while that app is closed; clicking it opens the app. Its label, symbol, bubble size, shape, color, background and motion can be customized in settings.
+
+**Bubble groups** can collect selected providers and app shortcuts into one bubble while their activities are active. Name a group, choose its members, and optionally keep its bubble pinned while those members are active. Under Activity policy, choose **Group overflow** to replace the last visible slot with a group whenever activity count exceeds the configured limit. For example, a limit of three keeps the first two activities visible and groups the third and later activities together.
