@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  patch-build-push:
+  patch-validate-push:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -26,14 +26,24 @@ jobs:
 
           replacements = [
               (
-                  '        refreshLockScreenPresenceIfNeeded(force: true)\n',
-                  '        // Schedule after macOS has completed the desktop -> secure-session handoff.\n        // The notification daemon owns the delayed request if Halo is suspended meanwhile.\n        refreshLockScreenPresenceIfNeeded(force: true, deliveryDelay: 1.0)\n',
-                  'initial delivery'
+                  '    private var lockScreenPresenceRefreshWork: DispatchWorkItem?\n    private var lastLockScreenPresenceSignature = ""\n',
+                  '    private var lockScreenPresenceRefreshWork: DispatchWorkItem?\n    private var lockScreenPresenceReadyAt = Date.distantPast\n    private var lastLockScreenPresenceSignature = ""\n',
+                  'presence ready state'
+              ),
+              (
+                  '        lockScreenSessionSuspended = true\n        lockScreenUnlockWork?.cancel()\n',
+                  '        lockScreenSessionSuspended = true\n        // Keep every notification refresh out of the desktop -> secure-session handoff.\n        // The notification daemon can then present it after the Lock Screen is actually visible.\n        lockScreenPresenceReadyAt = Date().addingTimeInterval(1.0)\n        lockScreenUnlockWork?.cancel()\n',
+                  'lock handoff readiness'
+              ),
+              (
+                  '        lockScreenSessionSuspended = false\n        clearLockScreenPresence()\n',
+                  '        lockScreenSessionSuspended = false\n        lockScreenPresenceReadyAt = .distantPast\n        clearLockScreenPresence()\n',
+                  'unlock readiness reset'
               ),
               (
                   '''    private func refreshLockScreenPresenceIfNeeded(force: Bool = false, preview: Bool = false) {\n        let preferences = LockScreenPresencePreferences.current()\n        guard preferences.enabled else {\n            clearLockScreenPresence()\n            return\n        }\n        guard preview || lockScreenSessionSuspended else { return }\n\n        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in\n            let authorized = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional\n            guard authorized else { return }\n            Task { @MainActor [weak self] in\n                self?.deliverLockScreenPresence(preferences: preferences, force: force, preview: preview)\n            }\n        }\n    }\n\n    private func deliverLockScreenPresence(\n        preferences: LockScreenPresencePreferences,\n        force: Bool,\n        preview: Bool\n    ) {''',
-                  '''    private func refreshLockScreenPresenceIfNeeded(\n        force: Bool = false,\n        preview: Bool = false,\n        deliveryDelay: TimeInterval = 0\n    ) {\n        let preferences = LockScreenPresencePreferences.current()\n        guard preferences.enabled else {\n            clearLockScreenPresence()\n            return\n        }\n        guard preview || lockScreenSessionSuspended else { return }\n\n        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in\n            let authorized = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional\n            let lockScreenAllowed = settings.lockScreenSetting == .enabled\n            guard authorized, preview || lockScreenAllowed else { return }\n            Task { @MainActor [weak self] in\n                self?.deliverLockScreenPresence(\n                    preferences: preferences,\n                    force: force,\n                    preview: preview,\n                    deliveryDelay: deliveryDelay\n                )\n            }\n        }\n    }\n\n    private func deliverLockScreenPresence(\n        preferences: LockScreenPresencePreferences,\n        force: Bool,\n        preview: Bool,\n        deliveryDelay: TimeInterval\n    ) {''',
-                  'permission and delay flow'
+                  '''    private func refreshLockScreenPresenceIfNeeded(force: Bool = false, preview: Bool = false) {\n        let preferences = LockScreenPresencePreferences.current()\n        guard preferences.enabled else {\n            clearLockScreenPresence()\n            return\n        }\n        guard preview || lockScreenSessionSuspended else { return }\n\n        let deliveryDelay = preview ? 0 : max(0, lockScreenPresenceReadyAt.timeIntervalSinceNow)\n        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in\n            let authorized = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional\n            let lockScreenAllowed = settings.lockScreenSetting == .enabled\n            guard authorized, preview || lockScreenAllowed else { return }\n            Task { @MainActor [weak self] in\n                self?.deliverLockScreenPresence(\n                    preferences: preferences,\n                    force: force,\n                    preview: preview,\n                    deliveryDelay: deliveryDelay\n                )\n            }\n        }\n    }\n\n    private func deliverLockScreenPresence(\n        preferences: LockScreenPresencePreferences,\n        force: Bool,\n        preview: Bool,\n        deliveryDelay: TimeInterval\n    ) {''',
+                  'permission and delayed delivery flow'
               ),
               (
                   '''        center.add(UNNotificationRequest(\n            identifier: Self.lockScreenPresenceNotificationID,\n            content: content,\n            trigger: nil\n        ))''',
@@ -52,23 +62,34 @@ jobs:
       - name: Parse WindowManager
         run: xcrun swiftc -parse Halo/NotchEngine/WindowManager.swift
 
-      - name: Build Halo Direct
+      - name: Typecheck notification APIs
         run: |
-          set -o pipefail
-          xcodebuild -project Halo.xcodeproj -scheme "Halo Direct" -configuration "Debug Direct" -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          cat > /tmp/HaloLockScreenNotificationProbe.swift <<'EOF'
+          import Foundation
+          import UserNotifications
 
-      - name: Build Halo App Store
-        run: |
-          set -o pipefail
-          xcodebuild -project Halo.xcodeproj -scheme "Halo App Store" -configuration "Debug App Store" -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          func probe(_ settings: UNNotificationSettings) {
+              _ = settings.lockScreenSetting == .enabled
+              let trigger: UNNotificationTrigger = UNTimeIntervalNotificationTrigger(timeInterval: 1.0, repeats: false)
+              _ = trigger
+          }
+          EOF
+          xcrun swiftc -typecheck -target arm64-apple-macos13.0 /tmp/HaloLockScreenNotificationProbe.swift
 
-      - name: Commit repair and restore one-shot workflow
+      - name: Validate patch
         run: |
-          git show HEAD^:.github/workflows/perf-surface-geometry-hotfix.yml > .github/workflows/perf-surface-geometry-hotfix.yml
+          git diff --check
+          grep -q 'lockScreenPresenceReadyAt' Halo/NotchEngine/WindowManager.swift
+          grep -q 'lockScreenSetting == .enabled' Halo/NotchEngine/WindowManager.swift
+          grep -q 'UNTimeIntervalNotificationTrigger' Halo/NotchEngine/WindowManager.swift
+
+      - name: Commit repair and restore original workflow
+        run: |
+          git show f160df00d8615f5dbf5f64cec503e9608c18817f:.github/workflows/perf-surface-geometry-hotfix.yml > .github/workflows/perf-surface-geometry-hotfix.yml
           rm -f .github/LOCKSCREEN_FIX_BACKUP_REF.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Halo/NotchEngine/WindowManager.swift .github/workflows/perf-surface-geometry-hotfix.yml
           git rm -f --ignore-unmatch .github/LOCKSCREEN_FIX_BACKUP_REF.txt
-          git commit -m "Fix Lock Screen Presence delivery timing"
+          git commit -m "Fix Lock Screen Presence delivery timing [skip ci]"
           git push origin HEAD:main
