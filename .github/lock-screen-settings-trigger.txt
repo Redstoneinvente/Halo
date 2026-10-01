@@ -1,2 +1,2 @@
 Apply Lock Screen settings guidance to Halo Settings.
-Triggered after workflow fix: 2026-10-01
+Triggered via merge after workflow fix: 2026-10-01
