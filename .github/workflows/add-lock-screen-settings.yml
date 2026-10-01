@@ -5,8 +5,6 @@ on:
     branches: [main]
     paths:
       - '.github/lock-screen-settings-trigger.txt'
-  issues:
-    types: [opened]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +12,6 @@ permissions:
 
 jobs:
   apply:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.issue.title == 'Apply Lock Screen Settings'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +26,7 @@ jobs:
           p = Path('Halo/Views/WorkspaceSettingsView.swift')
           s = p.read_text()
 
-          def replace_once(old: str, new: str, label: str):
+          def replace_once(old, new, label):
               global s
               count = s.count(old)
               if count != 1:
@@ -43,27 +40,9 @@ jobs:
           )
 
           replace_once(
-              '                        Text(isFullOnlySection(section ?? "")\n                             ? "Available with Halo Full"\n                             : (section == "Visual Workspace Editor" ? "Design the active Visual Workspace" : "Changes are saved automatically"))\n',
-              '                        Text(sectionSubtitle(section ?? "General"))\n',
-              'Settings header subtitle'
-          )
-
-          section_icon_anchor = '''    private func sectionIcon(_ name: String) -> String {
-'''
-          section_subtitle = '''    private func sectionSubtitle(_ name: String) -> String {
-        if isFullOnlySection(name) { return "Available with Halo Full" }
-        switch name {
-        case "Visual Workspace Editor": return "Design the active Visual Workspace"
-        case "Lock Screen": return "How Halo behaves when your Mac is locked"
-        default: return "Changes are saved automatically"
-        }
-    }
-
-'''
-          replace_once(
-              section_icon_anchor,
-              section_subtitle + section_icon_anchor,
-              'Section subtitle helper'
+              '                             : (section == "Visual Workspace Editor" ? "Design the active Visual Workspace" : "Changes are saved automatically"))\n',
+              '                             : (section == "Lock Screen" ? "How Halo behaves when your Mac is locked" : (section == "Visual Workspace Editor" ? "Design the active Visual Workspace" : "Changes are saved automatically")))\n',
+              'Lock Screen header subtitle'
           )
 
           replace_once(
@@ -73,68 +52,69 @@ jobs:
           )
 
           replace_once(
-              '        case "Privacy":\n            if featureAccess.allows(.clipboardWidget) {\n',
-              '        case "Lock Screen":\n            LockScreenSettingsPane()\n        case "Privacy":\n            if featureAccess.allows(.clipboardWidget) {\n',
+              '        case "Reviews":\n            HaloReviewCenterView()\n',
+              '        case "Lock Screen":\n            LockScreenSettingsPane()\n        case "Reviews":\n            HaloReviewCenterView()\n',
               'Lock Screen content route'
           )
 
-          marker = '\n// MARK: - Halo Lite / Full presentation'
-          if s.count(marker) != 1:
-              raise SystemExit(f'Lock Screen pane insertion marker: expected exactly one match, found {s.count(marker)}')
+          if 'private struct LockScreenSettingsPane: View' in s:
+              raise SystemExit('Lock Screen settings pane already exists')
 
-          pane = r'''
-
-@MainActor
-private struct LockScreenSettingsPane: View {
-    var body: some View {
-        Group {
-            Section("Lock Screen behavior") {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "lock.fill")
-                        .font(.title2)
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 28)
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Halo stays out of the macOS Lock Screen")
-                            .font(.headline)
-                        Text("When your Mac is locked, macOS owns the secure Lock Screen. Halo does not draw over it, replace it, or remain interactive above it.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-
-            Section("After you unlock") {
-                Label("Halo returns with your signed-in session", systemImage: "lock.open.fill")
-                    .font(.headline)
-
-                Text("Your Halo profile and settings stay intact while the Mac is locked. Once macOS returns you to your desktop, Halo continues normally with the same configuration.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Section("Secure by design") {
-                Label("Uses standard macOS app behavior", systemImage: "checkmark.shield.fill")
-                    .font(.headline)
-
-                Text("Halo intentionally does not inject into the system login process, imitate the macOS Lock Screen, or use private APIs to force its surface above the secure interface.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text("There is no “Show Halo on Lock Screen” switch because that would imply behavior Halo does not support through the normal Mac App Store app model.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-}
-'''
-          s = s.replace(marker, pane + marker, 1)
+          pane_lines = [
+              '',
+              '',
+              '@MainActor',
+              'private struct LockScreenSettingsPane: View {',
+              '    var body: some View {',
+              '        Group {',
+              '            Section("Lock Screen behavior") {',
+              '                HStack(alignment: .top, spacing: 12) {',
+              '                    Image(systemName: "lock.fill")',
+              '                        .font(.title2)',
+              '                        .foregroundStyle(Color.accentColor)',
+              '                        .frame(width: 28)',
+              '',
+              '                    VStack(alignment: .leading, spacing: 5) {',
+              '                        Text("Not shown while your Mac is locked")',
+              '                            .font(.headline)',
+              '                        Text("Halo follows the macOS secure session boundary. When the Lock Screen is active, Halo stays out of the secure interface and is not interactive there.")',
+              '                            .font(.caption)',
+              '                            .foregroundStyle(.secondary)',
+              '                            .fixedSize(horizontal: false, vertical: true)',
+              '                    }',
+              '                }',
+              '            }',
+              '',
+              '            Section("After you unlock") {',
+              '                Label("Halo resumes with your desktop session", systemImage: "lock.open.fill")',
+              '                    .font(.headline)',
+              '',
+              '                Text("Your Halo profile and settings stay intact while the Mac is locked. After you unlock and return to the desktop, Halo continues normally with the same configuration.")',
+              '                    .font(.caption)',
+              '                    .foregroundStyle(.secondary)',
+              '                    .fixedSize(horizontal: false, vertical: true)',
+              '            }',
+              '',
+              '            Section("Secure by design") {',
+              '                Label("Uses standard macOS app behavior", systemImage: "checkmark.shield.fill")',
+              '                    .font(.headline)',
+              '',
+              '                Text("Halo does not replace the macOS Lock Screen, inject into the login process, or use private APIs to force its surface above the secure interface.")',
+              '                    .font(.caption)',
+              '                    .foregroundStyle(.secondary)',
+              '                    .fixedSize(horizontal: false, vertical: true)',
+              '',
+              '                Text("Lock Screen presentation is controlled by macOS, so Halo does not offer a switch to draw the notch surface over it.")',
+              '                    .font(.caption)',
+              '                    .foregroundStyle(.secondary)',
+              '                    .fixedSize(horizontal: false, vertical: true)',
+              '            }',
+              '        }',
+              '    }',
+              '}',
+              ''
+          ]
+          s += '\n'.join(pane_lines)
           p.write_text(s)
           PY
 
