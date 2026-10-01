@@ -66,3 +66,30 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build
+
+  lock-screen-presence-patch:
+    name: Lock Screen Presence Patch
+    if: github.event_name == 'pull_request' && github.head_ref == 'lock-screen-presence'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Apply source patch
+        run: python3 .github/lock-screen-presence-patch.py
+      - name: Validate patch
+        run: git diff --check
+      - name: Commit source changes
+        run: |
+          if git diff --quiet; then
+            echo "No source changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/NotchEngine/WindowManager.swift Halo/Views/WorkspaceSettingsView.swift
+          git commit -m "Add contextual Lock Screen Presence"
+          git push origin HEAD:${{ github.head_ref }}
