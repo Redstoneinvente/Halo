@@ -926,6 +926,7 @@ final class WindowManager {
     private var lockScreenPreviewGeneration = 0
     private var pendingWakeActivation = false
     private var lockScreenPresenceRefreshWork: DispatchWorkItem?
+    private var lockScreenPresenceReadyAt = Date.distantPast
     private var lastLockScreenPresenceSignature = ""
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
@@ -1413,6 +1414,9 @@ final class WindowManager {
     private func handleLockScreenSessionResigned() {
         guard !lockScreenSessionSuspended else { return }
         lockScreenSessionSuspended = true
+        // Keep every notification refresh out of the desktop -> secure-session handoff.
+        // The notification daemon can then present it after the Lock Screen is actually visible.
+        lockScreenPresenceReadyAt = Date().addingTimeInterval(1.0)
         lockScreenUnlockWork?.cancel()
         lockScreenUnlockWork = nil
         lockScreenExpandedSnapshot = hosts.mapValues { $0.state.expanded }
@@ -1439,6 +1443,7 @@ final class WindowManager {
     private func handleLockScreenSessionBecameActive() {
         guard lockScreenSessionSuspended else { return }
         lockScreenSessionSuspended = false
+        lockScreenPresenceReadyAt = .distantPast
         clearLockScreenPresence()
         lockScreenUnlockWork?.cancel()
 
@@ -1595,11 +1600,18 @@ final class WindowManager {
         }
         guard preview || lockScreenSessionSuspended else { return }
 
+        let deliveryDelay = preview ? 0 : max(0, lockScreenPresenceReadyAt.timeIntervalSinceNow)
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
             let authorized = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
-            guard authorized else { return }
+            let lockScreenAllowed = settings.lockScreenSetting == .enabled
+            guard authorized, preview || lockScreenAllowed else { return }
             Task { @MainActor [weak self] in
-                self?.deliverLockScreenPresence(preferences: preferences, force: force, preview: preview)
+                self?.deliverLockScreenPresence(
+                    preferences: preferences,
+                    force: force,
+                    preview: preview,
+                    deliveryDelay: deliveryDelay
+                )
             }
         }
     }
@@ -1607,7 +1619,8 @@ final class WindowManager {
     private func deliverLockScreenPresence(
         preferences: LockScreenPresencePreferences,
         force: Bool,
-        preview: Bool
+        preview: Bool,
+        deliveryDelay: TimeInterval
     ) {
         guard let card = lockScreenPresenceCard(preferences: preferences, preview: preview) else {
             clearLockScreenPresence()
@@ -1630,10 +1643,19 @@ final class WindowManager {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [Self.lockScreenPresenceNotificationID])
         center.removeDeliveredNotifications(withIdentifiers: [Self.lockScreenPresenceNotificationID])
+        let trigger: UNNotificationTrigger?
+        if deliveryDelay > 0 {
+            trigger = UNTimeIntervalNotificationTrigger(
+                timeInterval: max(0.1, deliveryDelay),
+                repeats: false
+            )
+        } else {
+            trigger = nil
+        }
         center.add(UNNotificationRequest(
             identifier: Self.lockScreenPresenceNotificationID,
             content: content,
-            trigger: nil
+            trigger: trigger
         ))
     }
 
