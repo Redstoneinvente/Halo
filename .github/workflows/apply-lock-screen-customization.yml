@@ -1,0 +1,602 @@
+name: Apply Lock Screen Customization
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'lock-screen-customization'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply Lock Screen customization
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f"Missing patch anchor: {label}")
+              return text.replace(old, new, 1)
+
+          wm_path = Path("Halo/NotchEngine/WindowManager.swift")
+          wm = wm_path.read_text()
+
+          wm = replace_once(
+              wm,
+              "    private var surfaceRuntimeEnabled = false\n    private var initialActivationPending = false\n",
+              "    private var surfaceRuntimeEnabled = false\n    private var initialActivationPending = false\n    private var lockScreenSessionSuspended = false\n    private var lockScreenExpandedSnapshot: [String: Bool] = [:]\n    private var lockScreenUnlockWork: DispatchWorkItem?\n    private var lockScreenPreviewGeneration = 0\n    private var pendingWakeActivation = false\n",
+              "lock screen runtime properties"
+          )
+
+          wm = replace_once(
+              wm,
+              "        bubbleManager.setSurfaceRuntimeEnabled(granted)\n",
+              "        bubbleManager.setSurfaceRuntimeEnabled(granted && !lockScreenSessionSuspended)\n",
+              "bubble runtime gate"
+          )
+
+          old_wake = '''        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+            .receive(on: RunLoop.main).sink { [weak self] _ in
+                self?.playActivation(context: ActivationLaunchContext(event: .wake, macJustStarted: false))
+            }.store(in: &subscriptions)
+'''
+          new_wake = '''        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.sessionDidResignActiveNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.handleLockScreenSessionResigned() }
+            .store(in: &subscriptions)
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.sessionDidBecomeActiveNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.handleLockScreenSessionBecameActive() }
+            .store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: .init("HaloPreviewLockScreenTransition"))
+            .receive(on: RunLoop.main)
+            .sink { [weak self] note in self?.previewLockScreenTransition(note) }
+            .store(in: &subscriptions)
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+            .receive(on: RunLoop.main).sink { [weak self] _ in
+                guard let self else { return }
+                if self.lockScreenSessionSuspended {
+                    self.pendingWakeActivation = true
+                } else {
+                    self.playActivation(context: ActivationLaunchContext(event: .wake, macJustStarted: false))
+                }
+            }.store(in: &subscriptions)
+'''
+          wm = replace_once(wm, old_wake, new_wake, "workspace lock observers")
+
+          methods_anchor = "    private var closedNotchActivityPreferences: ClosedNotchActivityPreferences {\n"
+          methods = r'''    private struct LockScreenPreferences {
+        var effectsEnabled: Bool
+        var lockAnimation: String
+        var lockDuration: Double
+        var lockSound: String
+        var lockHaptic: Int
+        var unlockAnimation: String
+        var unlockDuration: Double
+        var unlockDelay: Double
+        var unlockSound: String
+        var unlockHaptic: Int
+        var restoreBehavior: String
+        var runActivationSequence: Bool
+
+        static func current() -> LockScreenPreferences {
+            let defaults = UserDefaults.standard
+            func bool(_ key: String, fallback: Bool) -> Bool {
+                defaults.object(forKey: key) == nil ? fallback : defaults.bool(forKey: key)
+            }
+            func double(_ key: String, fallback: Double, range: ClosedRange<Double>) -> Double {
+                let raw = defaults.object(forKey: key) == nil ? fallback : defaults.double(forKey: key)
+                return min(range.upperBound, max(range.lowerBound, raw))
+            }
+            return LockScreenPreferences(
+                effectsEnabled: bool("HaloLockScreenEffectsEnabled", fallback: true),
+                lockAnimation: defaults.string(forKey: "HaloLockScreenLockAnimation") ?? "retract",
+                lockDuration: double("HaloLockScreenLockDuration", fallback: 0.24, range: 0.05...1.5),
+                lockSound: defaults.string(forKey: "HaloLockScreenLockSound") ?? "off",
+                lockHaptic: min(6, max(0, defaults.integer(forKey: "HaloLockScreenLockHaptic"))),
+                unlockAnimation: defaults.string(forKey: "HaloLockScreenUnlockAnimation") ?? "spring",
+                unlockDuration: double("HaloLockScreenUnlockDuration", fallback: 0.32, range: 0.05...1.5),
+                unlockDelay: double("HaloLockScreenUnlockDelay", fallback: 0.08, range: 0...2.0),
+                unlockSound: defaults.string(forKey: "HaloLockScreenUnlockSound") ?? "off",
+                unlockHaptic: min(6, max(0, defaults.integer(forKey: "HaloLockScreenUnlockHaptic"))),
+                restoreBehavior: defaults.string(forKey: "HaloLockScreenRestoreBehavior") ?? "previous",
+                runActivationSequence: bool("HaloLockScreenRunActivationSequence", fallback: false)
+            )
+        }
+    }
+
+    private func playLockScreenFeedback(sound: String, haptic: Int, id: String) {
+        HaloHoverHaptics.pulse(id: id, strength: haptic, pattern: .single, minimumInterval: 0.03)
+        let candidate: (String, Float)?
+        switch sound {
+        case "soft": candidate = ("Tink", 0.045)
+        case "pop": candidate = ("Pop", 0.05)
+        case "glass": candidate = ("Glass", 0.04)
+        default: candidate = nil
+        }
+        guard let candidate,
+              let sound = NSSound(named: NSSound.Name(candidate.0)) else { return }
+        sound.volume = candidate.1
+        sound.play()
+    }
+
+    private func lockScreenExitFrame(for host: Host, animation: String) -> CGRect {
+        let current = host.panel.frame
+        switch animation {
+        case "slideUp":
+            return current.offsetBy(dx: 0, dy: min(36, max(18, current.height * 0.22)))
+        case "shrink":
+            let dx = min(current.width * 0.09, 28)
+            let dy = min(current.height * 0.09, 20)
+            return current.insetBy(dx: dx, dy: dy).offsetBy(dx: 0, dy: dy)
+        case "retract":
+            return targetFrame(host: host, expanded: false)
+        default:
+            return current
+        }
+    }
+
+    private func animateLockScreenExit(
+        host: Host,
+        preferences: LockScreenPreferences,
+        orderOutOnCompletion: Bool,
+        completion: (() -> Void)? = nil
+    ) {
+        host.animator.cancel()
+        host.geometryEditorPanel.orderOut(nil)
+        host.ambientPanel.orderOut(nil)
+
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        guard preferences.effectsEnabled,
+              !reduceMotion,
+              preferences.lockAnimation != "instant" else {
+            if orderOutOnCompletion { host.panel.orderOut(nil) }
+            completion?()
+            return
+        }
+
+        let target = lockScreenExitFrame(for: host, animation: preferences.lockAnimation)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = preferences.lockDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            host.panel.animator().setFrame(target, display: true)
+            host.panel.animator().alphaValue = preferences.lockAnimation == "retract" ? 0.08 : 0
+        } completionHandler: { [weak self, weak host] in
+            guard let self, let host else { return }
+            if orderOutOnCompletion && self.lockScreenSessionSuspended {
+                host.panel.orderOut(nil)
+            }
+            completion?()
+        }
+    }
+
+    private func prepareUnlockStartFrame(for host: Host, target: CGRect, animation: String) -> CGRect {
+        switch animation {
+        case "slideDown":
+            return target.offsetBy(dx: 0, dy: min(36, max(18, target.height * 0.22)))
+        case "scaleUp", "spring":
+            let dx = min(target.width * 0.075, 24)
+            let dy = min(target.height * 0.075, 18)
+            return target.insetBy(dx: dx, dy: dy).offsetBy(dx: 0, dy: dy)
+        default:
+            return target
+        }
+    }
+
+    private func animateLockScreenEntry(host: Host, preferences: LockScreenPreferences) {
+        guard let geometry = host.geometry else { return }
+        let target = targetFrame(host: host, expanded: host.state.expanded)
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
+        host.animator.cancel()
+        host.panel.orderFrontRegardless()
+
+        guard preferences.effectsEnabled,
+              !reduceMotion,
+              preferences.unlockAnimation != "instant" else {
+            host.panel.alphaValue = 1
+            host.panel.setFrame(target, display: false)
+            return
+        }
+
+        let start = prepareUnlockStartFrame(for: host, target: target, animation: preferences.unlockAnimation)
+        host.panel.setFrame(start, display: false)
+        host.panel.alphaValue = preferences.unlockAnimation == "spring" ? 0.72 : 0
+
+        if preferences.unlockAnimation == "spring" {
+            var motion = geometry.appearance.surface
+            motion.opening = .spring
+            motion.duration = preferences.unlockDuration
+            motion.damping = 0.74
+            host.animator.move(
+                panel: host.panel,
+                state: host.state,
+                target: target,
+                options: motion,
+                preset: .elastic,
+                animations: true,
+                opening: true,
+                style: geometry.style,
+                completion: { [weak host] in host?.panel.alphaValue = 1 }
+            )
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = preferences.unlockDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            host.panel.animator().setFrame(target, display: true)
+            host.panel.animator().alphaValue = 1
+        }
+    }
+
+    private func handleLockScreenSessionResigned() {
+        guard !lockScreenSessionSuspended else { return }
+        lockScreenSessionSuspended = true
+        lockScreenUnlockWork?.cancel()
+        lockScreenUnlockWork = nil
+        lockScreenExpandedSnapshot = hosts.mapValues { $0.state.expanded }
+
+        bubbleManager.setSurfaceRuntimeEnabled(false)
+        IntegrationCIRuntime.shared.cleanupForSleepOrWake()
+
+        let preferences = LockScreenPreferences.current()
+        playLockScreenFeedback(
+            sound: preferences.lockSound,
+            haptic: preferences.lockHaptic,
+            id: "lockScreen.lock"
+        )
+
+        for host in hosts.values {
+            host.state.collapseTask?.cancel()
+            host.state.hoverExpandTask?.cancel()
+            host.state.cancelFileDrop()
+            animateLockScreenExit(host: host, preferences: preferences, orderOutOnCompletion: true)
+        }
+    }
+
+    private func handleLockScreenSessionBecameActive() {
+        guard lockScreenSessionSuspended else { return }
+        lockScreenSessionSuspended = false
+        lockScreenUnlockWork?.cancel()
+
+        let preferences = LockScreenPreferences.current()
+        let delay = preferences.effectsEnabled ? preferences.unlockDelay : 0
+        let work = DispatchWorkItem { [weak self] in
+            self?.finishLockScreenSessionBecameActive(preferences: preferences)
+        }
+        lockScreenUnlockWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func finishLockScreenSessionBecameActive(preferences: LockScreenPreferences) {
+        lockScreenUnlockWork = nil
+
+        for (id, host) in hosts {
+            let wasExpanded = lockScreenExpandedSnapshot[id] ?? false
+            let desiredExpanded: Bool
+            switch preferences.restoreBehavior {
+            case "closed": desiredExpanded = false
+            case "open": desiredExpanded = true
+            default: desiredExpanded = wasExpanded
+            }
+            host.state.collapseTask?.cancel()
+            host.state.hoverExpandTask?.cancel()
+            if host.state.expanded != desiredExpanded {
+                host.state.expanded = desiredExpanded
+            }
+        }
+
+        reconcile()
+        bubbleManager.setSurfaceRuntimeEnabled(surfaceRuntimeEnabled)
+
+        let simpleMode = store.workspace.settings.resolvedNotchMode == .simple
+        for host in hosts.values {
+            animateLockScreenEntry(host: host, preferences: preferences)
+            if !simpleMode && HaloFeatureAccess.shared.allows(.notchAmbient) {
+                host.ambientPanel.alphaValue = 1
+                host.ambientPanel.order(.below, relativeTo: host.panel.windowNumber)
+            }
+        }
+
+        playLockScreenFeedback(
+            sound: preferences.unlockSound,
+            haptic: preferences.unlockHaptic,
+            id: "lockScreen.unlock"
+        )
+
+        let shouldRunActivation = preferences.runActivationSequence || pendingWakeActivation
+        pendingWakeActivation = false
+        lockScreenExpandedSnapshot.removeAll()
+        guard shouldRunActivation else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + preferences.unlockDuration) { [weak self] in
+            self?.playActivation(context: ActivationLaunchContext(event: .wake, macJustStarted: false))
+        }
+    }
+
+    private func previewLockScreenTransition(_ note: Notification) {
+        guard !lockScreenSessionSuspended else { return }
+        let phase = note.userInfo?["phase"] as? String ?? "lock"
+        let preferences = LockScreenPreferences.current()
+        lockScreenPreviewGeneration += 1
+        let generation = lockScreenPreviewGeneration
+
+        if phase == "unlock" {
+            for host in hosts.values {
+                animateLockScreenEntry(host: host, preferences: preferences)
+            }
+            playLockScreenFeedback(
+                sound: preferences.unlockSound,
+                haptic: preferences.unlockHaptic,
+                id: "lockScreen.preview.unlock"
+            )
+            return
+        }
+
+        playLockScreenFeedback(
+            sound: preferences.lockSound,
+            haptic: preferences.lockHaptic,
+            id: "lockScreen.preview.lock"
+        )
+
+        for host in hosts.values {
+            animateLockScreenExit(host: host, preferences: preferences, orderOutOnCompletion: false)
+        }
+
+        let delay = max(0.12, preferences.lockDuration + 0.14)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, generation == self.lockScreenPreviewGeneration else { return }
+            for host in self.hosts.values {
+                self.animateLockScreenEntry(host: host, preferences: preferences)
+            }
+        }
+    }
+
+'''
+          wm = replace_once(wm, methods_anchor, methods + methods_anchor, "lock screen runtime methods")
+
+          wm = replace_once(
+              wm,
+              "    func stop() {\n        endSettingsSurfacePreview()\n",
+              "    func stop() {\n        lockScreenUnlockWork?.cancel()\n        lockScreenUnlockWork = nil\n        endSettingsSurfacePreview()\n",
+              "lock screen cleanup"
+          )
+
+          wm_path.write_text(wm)
+
+          settings_path = Path("Halo/Views/WorkspaceSettingsView.swift")
+          settings = settings_path.read_text()
+          marker = "@MainActor\nprivate struct LockScreenSettingsPane: View {"
+          start = settings.find(marker)
+          if start < 0:
+              raise SystemExit("Missing LockScreenSettingsPane")
+
+          replacement = r'''@MainActor
+private struct LockScreenSettingsPane: View {
+    @AppStorage("HaloLockScreenEffectsEnabled") private var effectsEnabled = true
+    @AppStorage("HaloLockScreenLockAnimation") private var lockAnimation = "retract"
+    @AppStorage("HaloLockScreenLockDuration") private var lockDuration = 0.24
+    @AppStorage("HaloLockScreenLockSound") private var lockSound = "off"
+    @AppStorage("HaloLockScreenLockHaptic") private var lockHaptic = 0
+    @AppStorage("HaloLockScreenUnlockAnimation") private var unlockAnimation = "spring"
+    @AppStorage("HaloLockScreenUnlockDuration") private var unlockDuration = 0.32
+    @AppStorage("HaloLockScreenUnlockDelay") private var unlockDelay = 0.08
+    @AppStorage("HaloLockScreenUnlockSound") private var unlockSound = "off"
+    @AppStorage("HaloLockScreenUnlockHaptic") private var unlockHaptic = 0
+    @AppStorage("HaloLockScreenRestoreBehavior") private var restoreBehavior = "previous"
+    @AppStorage("HaloLockScreenRunActivationSequence") private var runActivationSequence = false
+
+    private let hapticLabels = ["Off", "Light", "Medium", "Strong", "Very Strong", "Intense", "Maximum"]
+
+    var body: some View {
+        Group {
+            Section("Lock Screen customization") {
+                Toggle("Customize lock and unlock transitions", isOn: $effectsEnabled)
+
+                Text("Halo customizes the handoff between your desktop session and the macOS Lock Screen. The secure Lock Screen itself remains owned by macOS.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("When locking") {
+                Picker("Animation", selection: $lockAnimation) {
+                    Text("Retract to notch").tag("retract")
+                    Text("Fade out").tag("fade")
+                    Text("Slide up").tag("slideUp")
+                    Text("Shrink away").tag("shrink")
+                    Text("Instant").tag("instant")
+                }
+
+                LabeledContent("Duration") {
+                    HStack(spacing: 10) {
+                        Slider(value: $lockDuration, in: 0.05...1.5, step: 0.05)
+                            .frame(width: 220)
+                        Text("\(lockDuration, specifier: "%.2f") s")
+                            .monospacedDigit()
+                            .frame(width: 58, alignment: .trailing)
+                    }
+                }
+                .disabled(lockAnimation == "instant")
+
+                Picker("Sound", selection: $lockSound) {
+                    Text("Off").tag("off")
+                    Text("Soft tap").tag("soft")
+                    Text("Pop").tag("pop")
+                    Text("Glass").tag("glass")
+                }
+
+                LabeledContent("Haptic") {
+                    HStack(spacing: 10) {
+                        Slider(
+                            value: Binding(
+                                get: { Double(lockHaptic) },
+                                set: { lockHaptic = min(6, max(0, Int($0.rounded()))) }
+                            ),
+                            in: 0...6,
+                            step: 1
+                        )
+                        .frame(width: 220)
+                        Text(hapticLabels[min(6, max(0, lockHaptic))])
+                            .frame(width: 88, alignment: .trailing)
+                    }
+                }
+
+                Button("Preview lock transition") {
+                    NotificationCenter.default.post(
+                        name: .init("HaloPreviewLockScreenTransition"),
+                        object: nil,
+                        userInfo: ["phase": "lock"]
+                    )
+                }
+            }
+            .disabled(!effectsEnabled)
+
+            Section("After unlocking") {
+                Picker("Restore notch", selection: $restoreBehavior) {
+                    Text("Previous state").tag("previous")
+                    Text("Always closed").tag("closed")
+                    Text("Always open").tag("open")
+                }
+
+                Picker("Animation", selection: $unlockAnimation) {
+                    Text("Spring back").tag("spring")
+                    Text("Fade in").tag("fade")
+                    Text("Slide down").tag("slideDown")
+                    Text("Scale up").tag("scaleUp")
+                    Text("Instant").tag("instant")
+                }
+
+                LabeledContent("Delay") {
+                    HStack(spacing: 10) {
+                        Slider(value: $unlockDelay, in: 0...2, step: 0.05)
+                            .frame(width: 220)
+                        Text(unlockDelay < 0.01 ? "None" : "\(unlockDelay, specifier: "%.2f") s")
+                            .monospacedDigit()
+                            .frame(width: 58, alignment: .trailing)
+                    }
+                }
+
+                LabeledContent("Duration") {
+                    HStack(spacing: 10) {
+                        Slider(value: $unlockDuration, in: 0.05...1.5, step: 0.05)
+                            .frame(width: 220)
+                        Text("\(unlockDuration, specifier: "%.2f") s")
+                            .monospacedDigit()
+                            .frame(width: 58, alignment: .trailing)
+                    }
+                }
+                .disabled(unlockAnimation == "instant")
+
+                Picker("Sound", selection: $unlockSound) {
+                    Text("Off").tag("off")
+                    Text("Soft tap").tag("soft")
+                    Text("Pop").tag("pop")
+                    Text("Glass").tag("glass")
+                }
+
+                LabeledContent("Haptic") {
+                    HStack(spacing: 10) {
+                        Slider(
+                            value: Binding(
+                                get: { Double(unlockHaptic) },
+                                set: { unlockHaptic = min(6, max(0, Int($0.rounded()))) }
+                            ),
+                            in: 0...6,
+                            step: 1
+                        )
+                        .frame(width: 220)
+                        Text(hapticLabels[min(6, max(0, unlockHaptic))])
+                            .frame(width: 88, alignment: .trailing)
+                    }
+                }
+
+                Toggle("Play Activation Sequence after unlock", isOn: $runActivationSequence)
+
+                Button("Preview unlock transition") {
+                    NotificationCenter.default.post(
+                        name: .init("HaloPreviewLockScreenTransition"),
+                        object: nil,
+                        userInfo: ["phase": "unlock"]
+                    )
+                }
+            }
+            .disabled(!effectsEnabled)
+
+            Section("Security and system behavior") {
+                Label("Halo is hidden while the secure session is active", systemImage: "lock.shield.fill")
+                    .font(.headline)
+
+                Text("File drops, partner Context Interfaces, notch bubbles and other interactive Halo surfaces are suspended while the user session is inactive, then restored after unlock.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Label("Reduce Motion is respected automatically", systemImage: "figure.walk.motion")
+                    .font(.headline)
+
+                Text("When macOS Reduce Motion is enabled, Halo skips decorative lock and unlock motion while preserving the secure hide and restore behavior.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("Halo uses public NSWorkspace session notifications and does not replace loginwindow, inject into the Lock Screen, or use private APIs to force content above the secure interface.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
+                Button("Reset Lock Screen customization") {
+                    effectsEnabled = true
+                    lockAnimation = "retract"
+                    lockDuration = 0.24
+                    lockSound = "off"
+                    lockHaptic = 0
+                    unlockAnimation = "spring"
+                    unlockDuration = 0.32
+                    unlockDelay = 0.08
+                    unlockSound = "off"
+                    unlockHaptic = 0
+                    restoreBehavior = "previous"
+                    runActivationSequence = false
+                }
+            }
+        }
+    }
+}
+'''
+          settings = settings[:start] + replacement
+          settings_path.write_text(settings)
+          PY
+
+      - name: Validate Swift syntax
+        run: |
+          xcrun swiftc -parse Halo/NotchEngine/WindowManager.swift
+          xcrun swiftc -parse Halo/Views/WorkspaceSettingsView.swift
+          git diff --check
+
+      - name: Commit patch to feature branch
+        run: |
+          if git diff --quiet; then
+            echo "No patch required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Halo/NotchEngine/WindowManager.swift Halo/Views/WorkspaceSettingsView.swift
+          git commit -m "Add customizable Lock Screen transitions"
+          git push origin HEAD:${{ github.head_ref }}
