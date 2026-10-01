@@ -1,2 +1,2 @@
 Apply Lock Screen settings guidance to Halo Settings.
-PR workflow application: 2026-10-01
+PR workflow application retrigger: 2026-10-01
