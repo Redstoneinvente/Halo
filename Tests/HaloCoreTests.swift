@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 #if SWIFT_PACKAGE
 @testable import HaloCore
 #else
@@ -1553,5 +1554,38 @@ final class AudioCIMusicWidgetTests: XCTestCase {
         let valid = try music.validated()
         XCTAssertEqual(valid.artworkTreatment?.coverGlow, 1)
         XCTAssertEqual(valid.topMusicStyle?.topMusic?.count, 5)
+    }
+}
+
+final class ListeningArtworkTests: XCTestCase {
+    func testArtistCoverFollowsSelectedMetric() {
+        let now = Date()
+        let listens = [MusicListen(title: "Long", artist: "Artist", started: now, seconds: 300, play: false), MusicListen(title: "Popular", artist: "Artist", started: now, seconds: 30, play: true)]
+        var options = TopMusicOptions(); options.grouping = .artists
+        XCTAssertEqual(MusicRanking.rank(listens, options: options, now: now).first?.artworkKey, MusicArtworkIdentity.key(title: "Long", artist: "Artist"))
+        options.metric = .plays
+        XCTAssertEqual(MusicRanking.rank(listens, options: options, now: now).first?.artworkKey, MusicArtworkIdentity.key(title: "Popular", artist: "Artist"))
+    }
+    func testLegacyListeningOptionsEnableArtAndColors() throws {
+        var options = TopMusicOptions(); options.artworkEnabled = nil; options.albumColors = nil
+        let decoded = try JSONDecoder().decode(TopMusicOptions.self, from: JSONEncoder().encode(options))
+        XCTAssertTrue(decoded.showsArtwork); XCTAssertTrue(decoded.usesAlbumColors)
+        XCTAssertGreaterThan(decoded.presentationHeight(fontSize: 14, rich: true), decoded.presentationHeight(fontSize: 14, rich: false))
+    }
+    @MainActor func testArtworkSurvivesRelaunchAndClear() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let image = NSImage(size: NSSize(width: 20, height: 20))
+        image.lockFocus(); NSColor.systemPink.setFill(); NSRect(x: 0, y: 0, width: 20, height: 20).fill(); image.unlockFocus()
+        let cache = MusicArtworkCache(directory: folder)
+        let key = "../../album"
+        await cache.store(image: image, colors: [], key: key)
+        let relaunched = MusicArtworkCache(directory: folder)
+        let saved = await relaunched.load(key: key)
+        XCTAssertNotNil(saved.flatMap { NSImage(data: $0.data) })
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path).count, 1)
+        relaunched.clear()
+        let removed = await relaunched.load(key: key)
+        XCTAssertNil(removed)
     }
 }

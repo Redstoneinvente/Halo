@@ -1561,11 +1561,13 @@ struct ClosedNotchSettingsView: View {
                 Picker("Rank by", selection: binding.metric) { ForEach(TopMusicMetric.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                 Picker("Group", selection: binding.grouping) { ForEach(TopMusicGrouping.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                 Picker("Period", selection: binding.period) { ForEach(TopMusicPeriod.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
-                Picker("Display", selection: binding.presentation) { ForEach(TopMusicPresentation.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                Picker("Display", selection: binding.presentation) { ForEach(TopMusicPresentation.allCases, id: \.self) { Text($0.title).tag($0) } }
                 if binding.wrappedValue.presentation != .spotlight {
                     Stepper("Items: \(binding.wrappedValue.count)", value: binding.count, in: 1...5)
                 }
                 PreciseSlider(title: "Widget width", value: Binding(get: { widgetStyle(item).wrappedValue.width ?? 180 }, set: { widgetStyle(item).wrappedValue.width = $0 }), range: 80...320, step: 1, suffix: "pt")
+                Toggle("Album artwork", isOn: Binding(get: { binding.wrappedValue.showsArtwork }, set: { binding.wrappedValue.artworkEnabled = $0 }))
+                Toggle("Colors from album", isOn: Binding(get: { binding.wrappedValue.usesAlbumColors }, set: { binding.wrappedValue.albumColors = $0 }))
                 Toggle("Show totals", isOn: binding.showValues)
                 Toggle("Show artist", isOn: binding.showArtist)
                 Text("Collected locally while Halo observes playback. A play counts after 30 seconds; paused time and sleep are excluded. Existing player history is not imported. All time includes up to two years of retained history.").font(.caption).foregroundStyle(.secondary)

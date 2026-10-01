@@ -6,6 +6,7 @@ import CoreAudio
 import Carbon
 import UserNotifications
 import ImageIO
+import CryptoKit
 import Darwin
 
 @MainActor
@@ -848,6 +849,7 @@ final class MediaService: ObservableObject {
                   self.artworkKey == key else { return }
             self.artworkColors = colors
             self.artworkImage = image
+            if let image { await MusicArtworkCache.shared.store(image: image, colors: colors, key: MusicArtworkIdentity.key(title: self.title, artist: self.artist)) }
         }
     }
 
@@ -885,6 +887,7 @@ final class MediaService: ObservableObject {
                           self.generation == expectedGeneration, self.artworkKey == key else { return }
                     self.artworkColors = colors
                     self.artworkImage = image
+                    if let image { await MusicArtworkCache.shared.store(image: image, colors: colors, key: MusicArtworkIdentity.key(title: self.title, artist: self.artist)) }
                 }
             }
         }
@@ -1065,7 +1068,7 @@ final class MusicHistoryStore: ObservableObject {
         }
         if date.timeIntervalSince(lastSaved) >= 15 || sample.play { save(); lastSaved = date }
     }
-    func clear() { listens = []; accumulator = MusicListeningAccumulator(); save() }
+    func clear() { listens = []; accumulator = MusicListeningAccumulator(); MusicArtworkCache.shared.clear(); save() }
     private func save() {
         let snapshot = listens
         let key = storageKey
@@ -1073,5 +1076,87 @@ final class MusicHistoryStore: ObservableObject {
         persistenceQueue.async {
             if let data = try? JSONEncoder().encode(snapshot) { UserDefaults.standard.set(data, forKey: key) }
         }
+    }
+}
+
+
+struct MusicArtworkSnapshot: Codable {
+    let data: Data
+    let colors: [WidgetColor]
+}
+
+/// Small, bounded historical covers. No network access or player commands of its own.
+@MainActor
+final class MusicArtworkCache: ObservableObject {
+    static let shared = MusicArtworkCache()
+    @Published private(set) var revision = 0
+    private var epoch = 0
+    private var captured = Set<String>()
+    private let queue = DispatchQueue(label: "Halo.MusicArtwork.Cache", qos: .utility)
+    private let memory = NSCache<NSString, NSData>()
+    private let directory: URL
+    init(directory: URL? = nil) {
+        self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Halo/MusicArtwork-v1", isDirectory: true)
+        memory.countLimit = 512
+        memory.totalCostLimit = 24 * 1024 * 1024
+    }
+    private func url(_ key: String) -> URL {
+        let name = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        return directory.appendingPathComponent(name + ".json")
+    }
+    func store(image: NSImage, colors: [WidgetColor], key: String) async {
+        guard !captured.contains(key), let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        captured.insert(key)
+        if captured.count > 1024 { captured = [key] }
+        let expected = epoch
+        let destination = url(key)
+        let folder = directory
+        let palette = Array(colors.prefix(4)).compactMap { try? $0.validated() }
+        let saved: Data? = await withCheckedContinuation { continuation in
+            queue.async {
+                let edge = 128
+                guard let context = CGContext(data: nil, width: edge, height: edge, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { continuation.resume(returning: nil); return }
+                context.interpolationQuality = .high
+                context.draw(cg, in: CGRect(x: 0, y: 0, width: edge, height: edge))
+                guard let thumbnail = context.makeImage(), let bytes = NSBitmapImageRep(cgImage: thumbnail).representation(using: .jpeg, properties: [.compressionFactor: 0.82]),
+                      let record = try? JSONEncoder().encode(MusicArtworkSnapshot(data: bytes, colors: palette)), record.count <= 100_000 else { continuation.resume(returning: nil); return }
+                do {
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    try record.write(to: destination, options: .atomic)
+                    let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+                    if files.count > 512 {
+                        let sorted = files.sorted { a, b in
+                            let lhs = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                            let rhs = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                            return lhs < rhs
+                        }
+                        for old in sorted.prefix(files.count - 512) { try? FileManager.default.removeItem(at: old) }
+                    }
+                    continuation.resume(returning: record)
+                } catch { continuation.resume(returning: nil) }
+            }
+        }
+        guard epoch == expected else { return }
+        if let saved { memory.setObject(saved as NSData, forKey: key as NSString, cost: saved.count); revision += 1 }
+        else { captured.remove(key) }
+    }
+    func load(key: String) async -> MusicArtworkSnapshot? {
+        let expected = epoch
+        if let data = memory.object(forKey: key as NSString) { return try? JSONDecoder().decode(MusicArtworkSnapshot.self, from: data as Data) }
+        let path = url(key)
+        let data: Data? = await withCheckedContinuation { continuation in
+            queue.async {
+                guard let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 100_000 else { continuation.resume(returning: nil); return }
+                continuation.resume(returning: try? Data(contentsOf: path))
+            }
+        }
+        guard expected == epoch, let data, let snapshot = try? JSONDecoder().decode(MusicArtworkSnapshot.self, from: data) else { return nil }
+        memory.setObject(data as NSData, forKey: key as NSString, cost: data.count)
+        return snapshot
+    }
+    func clear() {
+        epoch += 1; revision += 1; captured.removeAll(); memory.removeAllObjects()
+        let folder = directory
+        queue.async { try? FileManager.default.removeItem(at: folder) }
     }
 }

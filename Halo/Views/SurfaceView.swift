@@ -8540,7 +8540,7 @@ private struct ContextMusicView: View {
         if options.showTopMusic == true {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Top listened").font(.caption.weight(.semibold)).foregroundStyle(secondaryTextColor)
-                TopMusicWidgetView(style: listeningStyle, fontSize: listeningStyle.fontSize ?? 14)
+                TopMusicWidgetView(style: listeningStyle, fontSize: listeningStyle.fontSize ?? 14, rich: true)
                     .foregroundStyle(listeningStyle.textColor?.color ?? primaryTextColor)
                     .modifier(ClosedNotchWidgetChrome(style: listeningStyle, inheritedColor: primaryTextColor))
             }

@@ -2192,10 +2192,8 @@ struct ContextMusicOptions: Codable, Equatable {
         let style = resolvedTopMusicStyle
         let music = style.topMusic ?? TopMusicOptions()
         let font = style.fontSize ?? 14
-        let chart = music.presentation == .chart ? (music.showValues ? 1.0 : 0) + (music.showArtist && music.grouping == .tracks ? 1.0 : 0) : 0
-        let content = font * 1.22 + chart * max(8, font * 0.7) * 1.22 + (chart > 0 ? 7 : 0)
         let icon = style.layout == .stacked || style.layout == .stackedReversed ? (style.iconSize ?? font) + (style.spacing ?? 2) + style.resolvedIconPadding * 2 : 0
-        return max(36, content + icon + style.verticalPadding * 2 + 24)
+        return music.presentationHeight(fontSize: font, rich: true) + icon + style.verticalPadding * 2 + 24
     }
     func validated() throws -> ContextMusicOptions {
         let numericValues: [Double] = [

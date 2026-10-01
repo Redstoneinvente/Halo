@@ -2692,33 +2692,28 @@ struct AlbumCoverWidgetView: View {
 struct TopMusicWidgetView: View {
     let style: ClosedNotchWidgetStyle
     let fontSize: Double
+    var rich = false
     @ObservedObject private var history = MusicHistoryStore.shared
     private var options: TopMusicOptions { (style.topMusic ?? TopMusicOptions()).normalized() }
-    private var ranks: [MusicRank] { MusicRanking.rank(history.listens, options: options) }
-    private func value(_ row: MusicRank) -> String {
-        options.metric == .plays ? "\(row.plays) plays" : (row.seconds < 60 ? "\(Int(row.seconds)) sec" : "\(Int(row.seconds / 60)) min")
-    }
     var body: some View {
         Group {
             switch style.layout {
             case .iconOnly: icon
-            case .textOnly: content
+            case .textOnly, .automatic: content
             case .textAndIcon: HStack(spacing: style.spacing ?? 5) { content; icon }
             case .stacked: VStack(spacing: style.spacing ?? 2) { icon; content }
             case .stackedReversed: VStack(spacing: style.spacing ?? 2) { content; icon }
-            case .automatic, .iconAndText: HStack(spacing: style.spacing ?? 5) { icon; content }
+            case .iconAndText: HStack(spacing: style.spacing ?? 5) { icon; content }
             }
         }
-        .font(.system(size: fontSize, weight: (style.fontWeight ?? .semibold).swiftUIFontWeight))
         .help("Top listened · \(options.period.rawValue) · \(options.metric.rawValue)")
-        .accessibilityElement(children: .combine)
     }
     private var icon: some View {
         let color = style.iconColor?.color ?? style.textColor?.color ?? .cyan
         let background = style.iconBackgroundColor?.color ?? color
         let rounded = [.roundedSquare, .glassRounded, .outlineRounded].contains(style.resolvedIconStyle)
         let outline = [.outlineCircle, .outlineRounded].contains(style.resolvedIconStyle)
-        return Image(systemName: style.iconSymbol ?? "chart.bar.fill")
+        return Image(systemName: style.iconSymbol ?? "sparkles")
             .font(.system(size: style.iconSize ?? fontSize))
             .foregroundStyle(color)
             .padding(style.resolvedIconStyle == .plain ? 0 : style.resolvedIconPadding)
@@ -2731,39 +2726,142 @@ struct TopMusicWidgetView: View {
             }
     }
     @ViewBuilder private var content: some View {
-        let rows = ranks
-        if rows.isEmpty { Text("Start listening").lineLimit(1) }
-        else {
-            switch options.presentation {
-            case .spotlight:
-                if let first = rows.first {
-                    HStack(spacing: style.spacing ?? 5) {
-                        Text(first.title + (options.showArtist && options.grouping == .tracks ? " · " + first.artist : "")).lineLimit(1)
-                        if options.showValues { Text(value(first)).font(.system(size: max(8, fontSize * 0.75))).opacity(0.7).lineLimit(1) }
-                    }
+        let rows = MusicRanking.rank(history.listens, options: options)
+        let height = options.presentationHeight(fontSize: fontSize, rich: rich)
+        if rows.isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: "headphones").font(.system(size: rich ? 25 : 18)).foregroundStyle(.cyan)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Your next obsession").font(.system(size: fontSize, weight: .semibold, design: .rounded))
+                    if rich { Text("Play something you love. Your favorites grow here.").font(.caption).foregroundStyle(.white.opacity(0.65)).lineLimit(2) }
                 }
-            case .ticker:
-                Text(rows.enumerated().map { index, row in
-                    "\(index + 1). " + row.title + (options.showArtist && options.grouping == .tracks ? " · " + row.artist : "") + (options.showValues ? "  " + value(row) : "")
-                }.joined(separator: "   •   ")).lineLimit(1)
-            case .chart:
-                HStack(alignment: .center, spacing: style.spacing ?? 5) {
-                    ForEach(rows) { row in
-                        let maximum = options.metric == .plays ? Double(rows.first?.plays ?? 1) : rows.first?.seconds ?? 1
-                        let amount = options.metric == .plays ? Double(row.plays) : row.seconds
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(row.title).lineLimit(1)
-                            GeometryReader { geometry in
-                                Capsule().fill(.primary.opacity(0.15))
-                                Capsule().fill(style.iconColor?.color ?? style.textColor?.color ?? .cyan)
-                                    .frame(width: geometry.size.width * max(0.04, min(1, amount / max(1, maximum))))
-                            }.frame(height: 3)
-                            if options.showArtist && options.grouping == .tracks { Text(row.artist).font(.system(size: max(8, fontSize * 0.7))).opacity(0.7).lineLimit(1) }
-                            if options.showValues { Text(value(row)).font(.system(size: max(8, fontSize * 0.7))).opacity(0.7).lineLimit(1) }
-                        }
-                    }
+                Spacer(minLength: 0)
+                Image(systemName: "sparkles").foregroundStyle(.pink)
+            }
+            .padding(rich ? 12 : 6)
+            .frame(height: height)
+            .background(LinearGradient(colors: [.indigo.opacity(0.45), .pink.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: rich ? 15 : 8))
+            .foregroundStyle(.white)
+        } else {
+            HStack(spacing: style.spacing ?? (rich ? 8 : 4)) {
+                ForEach(Array(rows.prefix(options.presentation == .spotlight ? 1 : options.count).enumerated()), id: \.element.id) { index, row in
+                    ListeningRankCard(row: row, rank: index + 1, maximum: options.metric == .plays ? Double(rows.first?.plays ?? 1) : rows.first?.seconds ?? 1, options: options, style: style, fontSize: fontSize, rich: rich)
+                        .frame(maxWidth: .infinity)
                 }
+            }.frame(height: height)
+        }
+    }
+}
+
+private struct ListeningRankCard: View {
+    let row: MusicRank
+    let rank: Int
+    let maximum: Double
+    let options: TopMusicOptions
+    let style: ClosedNotchWidgetStyle
+    let fontSize: Double
+    let rich: Bool
+    @ObservedObject private var cache = MusicArtworkCache.shared
+    @State private var image: NSImage?
+    @State private var palette: [WidgetColor] = []
+    @State private var hovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var key: String { row.artworkKey ?? row.id }
+    private var fallbackHue: Double { Double(key.utf8.reduce(UInt64(2166136261)) { ($0 ^ UInt64($1)) &* 16777619 } % 360) / 360 }
+    private var accent: Color { options.usesAlbumColors ? palette.first?.color ?? Color(hue: fallbackHue, saturation: 0.7, brightness: 1) : style.iconColor?.color ?? .cyan }
+    private var secondary: Color { options.usesAlbumColors ? palette.dropFirst().first?.color ?? Color(hue: (fallbackHue + 0.15).truncatingRemainder(dividingBy: 1), saturation: 0.8, brightness: 0.8) : .indigo }
+    private var total: String { options.metric == .plays ? "\(row.plays) plays" : (row.seconds < 60 ? "\(Int(row.seconds))s" : "\(Int(row.seconds / 60)) min") }
+    private var amount: Double { options.metric == .plays ? Double(row.plays) : row.seconds }
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: rich ? 14 : 7)
+                .fill(LinearGradient(colors: [accent.opacity(0.5), secondary.opacity(0.25), Color.black.opacity(0.75)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            if options.showsArtwork, let image {
+                Image(nsImage: image).resizable().scaledToFill().blur(radius: rich ? 22 : 12).opacity(0.24)
+            }
+            presentation.padding(rich ? 9 : 4)
+        }
+        .frame(height: options.presentationHeight(fontSize: fontSize, rich: rich))
+        .clipShape(RoundedRectangle(cornerRadius: rich ? 14 : 7))
+        .overlay(RoundedRectangle(cornerRadius: rich ? 14 : 7).stroke(accent.opacity(hovered ? 0.75 : 0.28), lineWidth: 1))
+        .scaleEffect(hovered && !reduceMotion ? 1.015 : 1)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: hovered)
+        .onHover { hovered = $0 }
+        .task(id: key + "|" + String(cache.revision)) {
+            let record = await cache.load(key: key)
+            guard !Task.isCancelled else { return }
+            image = record.flatMap { NSImage(data: $0.data) }
+            palette = record?.colors ?? []
+        }
+        .help("#\(rank) · \(row.title) · \(row.artist) · \(total)")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Rank \(rank), \(row.title), \(row.artist), \(total)")
+    }
+    @ViewBuilder private var presentation: some View {
+        switch options.presentation {
+        case .spotlight:
+            HStack(spacing: rich ? 10 : 6) {
+                if options.showsArtwork { cover(size: rich ? 52 : 24) }
+                VStack(alignment: .leading, spacing: rich ? 4 : 1) {
+                    if rich {
+                        Label("ON REPEAT", systemImage: "crown.fill").font(.system(size: 8, weight: .heavy, design: .rounded)).tracking(1.2).foregroundStyle(Color.yellow)
+                    }
+                    title
+                    if options.showArtist && options.grouping == .tracks { artist }
+                }
+                Spacer(minLength: 0)
+                if options.showValues { valueBadge }
+            }
+        case .chart:
+            VStack(alignment: .leading, spacing: rich ? 4 : 2) {
+                if options.showsArtwork { cover(size: rich ? 58 : 22).frame(maxWidth: .infinity, alignment: rich ? .center : .leading) }
+                title
+                if options.showArtist && options.grouping == .tracks { artist }
+                if options.showValues { Text(total).font(.system(size: rich ? 9 : 8, weight: .bold, design: .rounded)).foregroundStyle(.white.opacity(0.8)).lineLimit(1) }
+                GeometryReader { proxy in
+                    Capsule().fill(.white.opacity(0.12))
+                    Capsule().fill(LinearGradient(colors: [accent, .white.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
+                        .frame(width: proxy.size.width * max(0.03, min(1, amount / max(1, maximum))))
+                }.frame(height: rich ? 4 : 2)
+            }
+        case .ticker:
+            HStack(spacing: 5) {
+                if options.showsArtwork { cover(size: rich ? 28 : 20) }
+                if rich || !options.showsArtwork {
+                    VStack(alignment: .leading, spacing: 1) {
+                        title
+                        if options.showArtist && options.grouping == .tracks { artist }
+                        if options.showValues { Text(total).font(.system(size: 8, weight: .bold)).foregroundStyle(.white.opacity(0.75)).lineLimit(1) }
+                    }
+                } else if options.showValues { Text(total).font(.system(size: 8, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(1) }
             }
         }
+    }
+    private var title: some View {
+        Text(row.title).font(.system(size: rich ? fontSize : min(fontSize, options.presentation == .spotlight ? 12 : 10), weight: (style.fontWeight ?? .bold).swiftUIFontWeight, design: .rounded)).foregroundStyle(.white).lineLimit(1)
+    }
+    private var artist: some View {
+        Text(row.artist).font(.system(size: rich ? max(9, fontSize * 0.7) : 8, weight: .medium)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+    }
+    private var valueBadge: some View {
+        Text(total).font(.system(size: rich ? 10 : 8, weight: .bold, design: .rounded)).lineLimit(1)
+            .padding(.horizontal, rich ? 7 : 3).padding(.vertical, rich ? 5 : 2)
+            .background(accent.opacity(0.35), in: Capsule()).foregroundStyle(.white)
+    }
+    private func cover(size: Double) -> some View {
+        ZStack {
+            if let image { Image(nsImage: image).resizable().scaledToFill() }
+            else {
+                LinearGradient(colors: [accent, secondary], startPoint: .topLeading, endPoint: .bottomTrailing)
+                Image(systemName: options.grouping == .artists ? "person.fill" : "music.note").font(.system(size: size * 0.35, weight: .bold)).foregroundStyle(.white.opacity(0.85))
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: rich ? 8 : 4))
+        .overlay(alignment: .bottomTrailing) {
+            Text("\(rank)").font(.system(size: rich ? 9 : 7, weight: .heavy, design: .rounded)).foregroundStyle(rank == 1 ? .black : .white)
+                .padding(.horizontal, 4).padding(.vertical, 1).background(rank == 1 ? Color.yellow : accent, in: Capsule()).offset(x: 2, y: 2)
+        }
+        .shadow(color: .black.opacity(0.35), radius: rich ? 5 : 2, y: 2)
     }
 }

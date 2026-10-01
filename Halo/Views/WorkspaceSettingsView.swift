@@ -4974,8 +4974,10 @@ private struct ContextMusicSettings: View {
                 Picker("Rank by", selection: rankings.metric) { ForEach(TopMusicMetric.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                 Picker("Group", selection: rankings.grouping) { ForEach(TopMusicGrouping.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                 Picker("Period", selection: rankings.period) { ForEach(TopMusicPeriod.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
-                Picker("Display", selection: rankings.presentation) { ForEach(TopMusicPresentation.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                Picker("Display", selection: rankings.presentation) { ForEach(TopMusicPresentation.allCases, id: \.self) { Text($0.title).tag($0) } }
                 if rankings.wrappedValue.presentation != .spotlight { Stepper("Items: \(rankings.wrappedValue.count)", value: rankings.count, in: 1...5) }
+                Toggle("Album artwork", isOn: Binding(get: { rankings.wrappedValue.showsArtwork }, set: { rankings.wrappedValue.artworkEnabled = $0 }))
+                Toggle("Colors from album", isOn: Binding(get: { rankings.wrappedValue.usesAlbumColors }, set: { rankings.wrappedValue.albumColors = $0 }))
                 Toggle("Show totals", isOn: rankings.showValues)
                 Toggle("Show artist", isOn: rankings.showArtist)
                 Picker("Icon layout", selection: style.layout) { ForEach(ClosedNotchWidgetLayout.allCases) { Text($0.rawValue).tag($0) } }

@@ -2744,7 +2744,10 @@ enum AlbumCoverStyle: String, Codable, CaseIterable { case clean = "Clean", slee
 enum TopMusicPeriod: String, Codable, CaseIterable { case today = "Today", week = "7 days", month = "30 days", all = "All time" }
 enum TopMusicMetric: String, Codable, CaseIterable { case plays = "Plays", time = "Listening time" }
 enum TopMusicGrouping: String, Codable, CaseIterable { case tracks = "Tracks", artists = "Artists" }
-enum TopMusicPresentation: String, Codable, CaseIterable { case spotlight = "Spotlight", chart = "Mini chart", ticker = "Inline list" }
+enum TopMusicPresentation: String, Codable, CaseIterable {
+    case spotlight = "Spotlight", chart = "Mini chart", ticker = "Inline list"
+    var title: String { switch self { case .spotlight: return "Featured favorite"; case .chart: return "Album gallery"; case .ticker: return "Cover strip" } }
+}
 struct TopMusicOptions: Codable, Equatable {
     var period: TopMusicPeriod = .week
     var metric: TopMusicMetric = .time
@@ -2753,6 +2756,14 @@ struct TopMusicOptions: Codable, Equatable {
     var count = 3
     var showValues = true
     var showArtist = true
+    var artworkEnabled: Bool?
+    var albumColors: Bool?
+    var showsArtwork: Bool { artworkEnabled ?? true }
+    var usesAlbumColors: Bool { albumColors ?? true }
+    func presentationHeight(fontSize: Double, rich: Bool) -> Double {
+        if rich { switch presentation { case .spotlight: return max(64, fontSize * 2.7); case .chart: return max(138, fontSize * 3 + 80); case .ticker: return max(50, fontSize * 2.3) } }
+        switch presentation { case .spotlight: return max(32, fontSize * 1.8); case .chart: return max(64, fontSize * 2.5); case .ticker: return max(28, fontSize * 1.4) }
+    }
     func normalized() -> Self { var v = self; v.count = min(5, max(1, count)); return v }
 }
 struct MusicListen: Codable, Equatable {
@@ -2768,6 +2779,10 @@ struct MusicRank: Identifiable, Equatable {
     var artist: String
     var plays: Int
     var seconds: Double
+    var artworkKey: String?
+}
+enum MusicArtworkIdentity {
+    static func key(title: String, artist: String) -> String { title + "\u{1f}" + (artist.isEmpty ? "Unknown artist" : artist) }
 }
 enum MusicRanking {
     static func rank(_ listens: [MusicListen], options: TopMusicOptions, now: Date = Date(), calendar: Calendar = .current) -> [MusicRank] {
@@ -2779,13 +2794,19 @@ enum MusicRanking {
         case .all: start = .distantPast
         }
         var ranks: [String: MusicRank] = [:]
+        var covers: [String: [String: Double]] = [:]
         for listen in listens where listen.started >= start && listen.started <= now && listen.seconds.isFinite && listen.seconds >= 0 {
             let artist = listen.artist.isEmpty ? "Unknown artist" : listen.artist
             let key = options.grouping == .artists ? artist : listen.title + "\u{1f}" + artist
             var row = ranks[key] ?? MusicRank(id: key, title: options.grouping == .artists ? artist : listen.title, artist: artist, plays: 0, seconds: 0)
+            let artworkKey = MusicArtworkIdentity.key(title: listen.title, artist: artist)
+            covers[key, default: [:]][artworkKey, default: 0] += options.metric == .plays ? (listen.play ? 1 : 0) : listen.seconds
             row.plays += listen.play ? 1 : 0
             row.seconds += listen.seconds
             ranks[key] = row
+        }
+        for key in ranks.keys {
+            ranks[key]?.artworkKey = covers[key]?.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.first?.key
         }
         return ranks.values.filter { options.metric == .plays ? $0.plays > 0 : $0.seconds > 0 }.sorted {
             let a = options.metric == .plays ? Double($0.plays) : $0.seconds

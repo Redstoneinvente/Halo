@@ -1676,9 +1676,8 @@ final class WindowManager {
 
             case .topMusic:
                 let music = style.topMusic ?? TopMusicOptions()
-                let chartLines = 1 + (music.showValues ? 1 : 0) + (music.showArtist && music.grouping == .tracks ? 1 : 0)
-                let contentHeight = music.presentation == .chart ? lineHeight(textSize) + Double(chartLines - 1) * lineHeight(max(8, textSize * 0.7)) + 7 : lineHeight(textSize)
-                base = style.layout == .stacked || style.layout == .stackedReversed ? contentHeight + (style.iconSize ?? textSize) + (style.spacing ?? 2) : max(20, contentHeight)
+                let contentHeight = music.presentationHeight(fontSize: textSize, rich: false)
+                base = style.layout == .stacked || style.layout == .stackedReversed ? contentHeight + (style.iconSize ?? textSize) + (style.spacing ?? 2) : contentHeight
 
             case .media:
                 base = max(20, lineHeight(textSize))

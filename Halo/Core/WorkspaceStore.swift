@@ -212,7 +212,8 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             } == true || layout.closedNotch?.mediaOptions.map {
                 $0.artwork != .none
             } == true
-            return contextNeedsArtwork || contextNeedsPalette || hudNeedsPalette || closedNeedsArtwork ||
+            let listeningNeedsArtwork = context?.enabled == true && context?.showTopMusic == true || layout.closedNotch?.left == .topMusic || layout.closedNotch?.right == .topMusic
+            return listeningNeedsArtwork || contextNeedsArtwork || contextNeedsPalette || hudNeedsPalette || closedNeedsArtwork ||
                 layout.closedNotch?.visualizer?.dynamicColors == true ||
                 layout.closedNotch?.albumTextColor == true ||
                 layout.closedNotch?.albumBackgroundColor == true
