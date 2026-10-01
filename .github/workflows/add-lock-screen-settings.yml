@@ -1,0 +1,152 @@
+name: Add Lock Screen Settings
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/lock-screen-settings-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add Lock Screen settings page
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('Halo/Views/WorkspaceSettingsView.swift')
+          s = p.read_text()
+
+          def replace_once(old: str, new: str, label: str):
+              global s
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              s = s.replace(old, new, 1)
+
+          replace_once(
+              '        coreItems.append("Privacy")\n',
+              '        coreItems.append("Privacy")\n        coreItems.append("Lock Screen")\n',
+              'Core sidebar insertion'
+          )
+
+          replace_once(
+              '                        Text(isFullOnlySection(section ?? "")\n                             ? "Available with Halo Full"\n                             : (section == "Visual Workspace Editor" ? "Design the active Visual Workspace" : "Changes are saved automatically"))\n',
+              '                        Text(sectionSubtitle(section ?? "General"))\n',
+              'Settings header subtitle'
+          )
+
+          section_icon_anchor = '''    private func sectionIcon(_ name: String) -> String {
+'''
+          section_subtitle = '''    private func sectionSubtitle(_ name: String) -> String {
+        if isFullOnlySection(name) { return "Available with Halo Full" }
+        switch name {
+        case "Visual Workspace Editor": return "Design the active Visual Workspace"
+        case "Lock Screen": return "How Halo behaves when your Mac is locked"
+        default: return "Changes are saved automatically"
+        }
+    }
+
+'''
+          replace_once(
+              section_icon_anchor,
+              section_subtitle + section_icon_anchor,
+              'Section subtitle helper'
+          )
+
+          replace_once(
+              '        case "Privacy": return "hand.raised"\n',
+              '        case "Privacy": return "hand.raised"\n        case "Lock Screen": return "lock.fill"\n',
+              'Lock Screen icon'
+          )
+
+          replace_once(
+              '        case "Privacy":\n            if featureAccess.allows(.clipboardWidget) {\n',
+              '        case "Lock Screen":\n            LockScreenSettingsPane()\n        case "Privacy":\n            if featureAccess.allows(.clipboardWidget) {\n',
+              'Lock Screen content route'
+          )
+
+          marker = '\n// MARK: - Halo Lite'
+          if s.count(marker) != 1:
+              raise SystemExit(f'Lock Screen pane insertion marker: expected exactly one match, found {s.count(marker)}')
+
+          pane = r'''
+
+private struct LockScreenSettingsPane: View {
+    var body: some View {
+        Group {
+            Section("Lock Screen behavior") {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "lock.fill")
+                        .font(.title2)
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 28)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Halo stays out of the macOS Lock Screen")
+                            .font(.headline)
+                        Text("When your Mac is locked, macOS owns the secure Lock Screen. Halo does not draw over it, replace it, or remain interactive above it.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
+            Section("After you unlock") {
+                Label("Halo returns with your signed-in session", systemImage: "lock.open.fill")
+                    .font(.headline)
+
+                Text("Your Halo profile and settings stay intact while the Mac is locked. Once macOS returns you to your desktop, Halo continues normally with the same configuration.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("Secure by design") {
+                Label("Uses standard macOS app behavior", systemImage: "checkmark.shield.fill")
+                    .font(.headline)
+
+                Text("Halo intentionally does not inject into the system login process, imitate the macOS Lock Screen, or use private APIs to force its surface above the secure interface.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("There is no “Show Halo on Lock Screen” switch because that would imply behavior Halo does not support through the normal Mac App Store app model.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+'''
+          s = s.replace(marker, pane + marker, 1)
+          p.write_text(s)
+          PY
+
+      - name: Parse updated settings source
+        run: xcrun swiftc -parse Halo/Views/WorkspaceSettingsView.swift
+
+      - name: Commit Lock Screen settings
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Halo/Views/WorkspaceSettingsView.swift
+          git commit -m 'Add Lock Screen settings guidance'
+          git push origin HEAD:main
+
+      - name: Full build diagnostic
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build | tee /tmp/halo-build.log
