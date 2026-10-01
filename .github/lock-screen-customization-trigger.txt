@@ -1,1 +1,2 @@
 Apply customizable Lock Screen transitions.
+Registered workflow retrigger.
