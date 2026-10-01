@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: halo-build-variants-${{ github.ref }}-${{ github.run_number }}
+  group: halo-build-variants-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -66,35 +66,3 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build
-
-  lock-screen-customization:
-    name: Lock Screen Customization Patch
-    if: github.event_name == 'pull_request' && github.head_ref == 'lock-screen-customization'
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-          fetch-depth: 0
-      - name: Apply Lock Screen customization
-        run: python3 .github/scripts/apply_lock_screen_customization.py
-      - name: Validate patch structure
-        run: |
-          git diff --check
-          grep -q 'sessionDidResignActiveNotification' Halo/NotchEngine/WindowManager.swift
-          grep -q 'HaloLockScreenUnlockAnimation' Halo/Views/WorkspaceSettingsView.swift
-          grep -q 'Preview lock transition' Halo/Views/WorkspaceSettingsView.swift
-      - name: Commit patch to feature branch
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm -f .github/scripts/apply_lock_screen_customization.py .github/lock-screen-customization-trigger.txt || true
-          git add Halo/NotchEngine/WindowManager.swift Halo/Views/WorkspaceSettingsView.swift
-          if git diff --cached --quiet; then
-            echo "No patch required"
-            exit 0
-          fi
-          git commit -m "Add customizable Lock Screen transitions"
-          git push origin HEAD:${{ github.head_ref }}
