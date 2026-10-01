@@ -45,6 +45,7 @@ struct SettingsView: View {
             coreItems.append("Account & License")
         }
         coreItems.append("Privacy")
+        coreItems.append("Lock Screen")
 
         var designItems = ["Appearance", "Closed notch", "Notch Bubbles", "Notch Skins", "Notch Ambient", "Activation Sequence"]
         if HaloDistribution.current.supportsSparkle {
@@ -343,7 +344,7 @@ struct SettingsView: View {
                         Text(section ?? "General").font(.title2.bold())
                         Text(isFullOnlySection(section ?? "")
                              ? "Available with Halo Full"
-                             : (section == "Visual Workspace Editor" ? "Design the active Visual Workspace" : "Changes are saved automatically"))
+                             : (section == "Lock Screen" ? "How Halo behaves when your Mac is locked" : (section == "Visual Workspace Editor" ? "Design the active Visual Workspace" : "Changes are saved automatically")))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -442,6 +443,7 @@ struct SettingsView: View {
         case "Reviews": return "star.bubble.fill"
         case "Feedback & Support": return "bubble.left.and.bubble.right.fill"
         case "Privacy": return "hand.raised"
+        case "Lock Screen": return "lock.fill"
         case "Update Animation": return "arrow.down.circle"
         case "About": return "info.circle"
         default: return "wrench.and.screwdriver"
@@ -590,6 +592,8 @@ struct SettingsView: View {
             } else {
                 HaloAccountLicenseSettingsView()
             }
+        case "Lock Screen":
+            LockScreenSettingsPane()
         case "Reviews":
             HaloReviewCenterView()
         case "Feedback & Support":
@@ -8552,5 +8556,56 @@ private struct LauncherFavoriteApplicationsSheet: View {
         }.value
         applications = discovered
         isLoading = false
+    }
+}
+
+
+@MainActor
+private struct LockScreenSettingsPane: View {
+    var body: some View {
+        Group {
+            Section("Lock Screen behavior") {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "lock.fill")
+                        .font(.title2)
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 28)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Not shown while your Mac is locked")
+                            .font(.headline)
+                        Text("Halo follows the macOS secure session boundary. When the Lock Screen is active, Halo stays out of the secure interface and is not interactive there.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
+            Section("After you unlock") {
+                Label("Halo resumes with your desktop session", systemImage: "lock.open.fill")
+                    .font(.headline)
+
+                Text("Your Halo profile and settings stay intact while the Mac is locked. After you unlock and return to the desktop, Halo continues normally with the same configuration.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("Secure by design") {
+                Label("Uses standard macOS app behavior", systemImage: "checkmark.shield.fill")
+                    .font(.headline)
+
+                Text("Halo does not replace the macOS Lock Screen, inject into the login process, or use private APIs to force its surface above the secure interface.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("Lock Screen presentation is controlled by macOS, so Halo does not offer a switch to draw the notch surface over it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
