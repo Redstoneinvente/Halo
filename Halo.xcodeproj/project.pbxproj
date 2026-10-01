@@ -48,6 +48,8 @@
 		A11C0F1A0000000000000371 /* Views/PixelPetWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */; };
 		A57A00000000000000000001 /* Core/AppStoreLicensing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000101 /* Core/AppStoreLicensing.swift */; };
 		A57A00000000000000000011 /* Views/AppStoreSubscriptionGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */; };
+		A7E500000000000000000001 /* Services/HaloReviewService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7E500000000000000000101 /* Services/HaloReviewService.swift */; };
+		A7E500000000000000000002 /* Views/HaloReviewCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7E500000000000000000102 /* Views/HaloReviewCenterView.swift */; };
 		A9F000000000000000000001 /* Core/MediaRemoteController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000101 /* Core/MediaRemoteController.swift */; };
 		A9F000000000000000000002 /* Core/MediaRemoteTrackInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000102 /* Core/MediaRemoteTrackInfo.swift */; };
 		B0BB1E000000000000000001 /* NotchEngine/NotchBubbles.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0BB1E000000000000000101 /* NotchEngine/NotchBubbles.swift */; };
@@ -88,8 +90,6 @@
 		F8AFA0D33061155D004D7B68 /* Halo 2.storekit in Resources */ = {isa = PBXBuildFile; fileRef = F8AFA0D23061155D004D7B68 /* Halo 2.storekit */; };
 		FBAC00000000000000000001 /* Services/HaloFeedbackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */; };
 		FBAC00000000000000000002 /* Views/HaloFeedbackCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */; };
-		A7E500000000000000000001 /* Services/HaloReviewService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7E500000000000000000101 /* Services/HaloReviewService.swift */; };
-		A7E500000000000000000002 /* Views/HaloReviewCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7E500000000000000000102 /* Views/HaloReviewCenterView.swift */; };
 		FBAC00000000000000000301 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000300 /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
 
@@ -175,6 +175,8 @@
 		A11C0F1A0000000000000372 /* Views/PixelPetWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PixelPetWidget.swift; sourceTree = "<group>"; };
 		A57A00000000000000000101 /* Core/AppStoreLicensing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/AppStoreLicensing.swift; sourceTree = "<group>"; };
 		A57A00000000000000000111 /* Views/AppStoreSubscriptionGateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/AppStoreSubscriptionGateView.swift; sourceTree = "<group>"; };
+		A7E500000000000000000101 /* Services/HaloReviewService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HaloReviewService.swift; sourceTree = "<group>"; };
+		A7E500000000000000000102 /* Views/HaloReviewCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HaloReviewCenterView.swift; sourceTree = "<group>"; };
 		A9F000000000000000000101 /* Core/MediaRemoteController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/MediaRemoteController.swift; sourceTree = "<group>"; };
 		A9F000000000000000000102 /* Core/MediaRemoteTrackInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/MediaRemoteTrackInfo.swift; sourceTree = "<group>"; };
 		B0BB1E000000000000000101 /* NotchEngine/NotchBubbles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchEngine/NotchBubbles.swift; sourceTree = "<group>"; };
@@ -234,8 +236,6 @@
 		F8AFA0D23061155D004D7B68 /* Halo 2.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Halo 2.storekit"; sourceTree = "<group>"; };
 		FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HaloFeedbackService.swift; sourceTree = "<group>"; };
 		FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HaloFeedbackCenterView.swift; sourceTree = "<group>"; };
-		A7E500000000000000000101 /* Services/HaloReviewService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HaloReviewService.swift; sourceTree = "<group>"; };
-		A7E500000000000000000102 /* Views/HaloReviewCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HaloReviewCenterView.swift; sourceTree = "<group>"; };
 		FBAC00000000000000000300 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -770,7 +770,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 210;
+				CURRENT_PROJECT_VERSION = 212;
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -791,7 +791,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.9;
+				MARKETING_VERSION = 0.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -809,7 +809,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 210;
+				CURRENT_PROJECT_VERSION = 212;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
@@ -831,7 +831,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.9;
+				MARKETING_VERSION = 0.3.1;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -1063,7 +1063,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 210;
+				CURRENT_PROJECT_VERSION = 212;
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1084,7 +1084,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.9;
+				MARKETING_VERSION = 0.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.redstoneinvente.Halo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1102,7 +1102,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/Halo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 210;
+				CURRENT_PROJECT_VERSION = 212;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = NO;
@@ -1124,7 +1124,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.9;
+				MARKETING_VERSION = 0.3.1;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -1146,7 +1146,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/HaloAppStore.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 210;
+				CURRENT_PROJECT_VERSION = 212;
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1167,7 +1167,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.9;
+				MARKETING_VERSION = 0.3.1;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-Wl,-dead_strip_dylibs",
@@ -1189,7 +1189,7 @@
 				CODE_SIGN_ENTITLEMENTS = Halo/HaloAppStore.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 210;
+				CURRENT_PROJECT_VERSION = 212;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = U3H97AL77M;
 				ENABLE_APP_SANDBOX = YES;
@@ -1211,7 +1211,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.9;
+				MARKETING_VERSION = 0.3.1;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-Wl,-dead_strip_dylibs",
