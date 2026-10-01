@@ -1,1 +1,0 @@
-This branch exists only to produce a normal merged push for the Lock Screen settings patch.
