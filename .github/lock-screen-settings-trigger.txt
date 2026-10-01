@@ -1,0 +1,2 @@
+Apply Lock Screen settings guidance to Halo Settings.
+Triggered: 2026-10-01
