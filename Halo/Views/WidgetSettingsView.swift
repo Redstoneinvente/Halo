@@ -1348,15 +1348,28 @@ struct ClosedNotchSettingsView: View {
                 Picker(
                     "Foreground style",
                     selection: Binding(
-                        get: { artwork.wrappedValue.mode == .vinyl ? MediaArtworkMode.vinyl : .cover },
+                        get: { artwork.wrappedValue.mode == .floating ? .floating : (artwork.wrappedValue.mode == .vinyl ? .vinyl : .cover) },
                         set: { artwork.wrappedValue.mode = $0 }
                     )
                 ) {
                     Text("Album cover").tag(MediaArtworkMode.cover)
                     Text("Rotating vinyl").tag(MediaArtworkMode.vinyl)
+                    Text("Floating 3D").tag(MediaArtworkMode.floating)
                 }
                 .pickerStyle(.segmented)
 
+                if artwork.wrappedValue.mode != .vinyl {
+                    Picker("Cover treatment", selection: Binding(get: { artwork.wrappedValue.coverStyle ?? .clean }, set: { artwork.wrappedValue.coverStyle = $0 })) {
+                        ForEach(AlbumCoverStyle.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    if artwork.wrappedValue.coverStyle != nil && artwork.wrappedValue.coverStyle != .clean {
+                    PreciseSlider(title: "Frame thickness", value: Binding(get: { artwork.wrappedValue.coverBorder ?? 0.07 }, set: { artwork.wrappedValue.coverBorder = $0 }), range: 0...0.18, step: 0.01, decimals: 2)
+                    }
+                    if artwork.wrappedValue.mode == .floating {
+                    PreciseSlider(title: "Perspective", value: Binding(get: { artwork.wrappedValue.coverTilt ?? 16 }, set: { artwork.wrappedValue.coverTilt = $0 }), range: -30...30, step: 1, suffix: "°")
+                    }
+                    PreciseSlider(title: "Artwork glow", value: Binding(get: { artwork.wrappedValue.coverGlow ?? 0.35 }, set: { artwork.wrappedValue.coverGlow = $0 }), range: 0...1, step: 0.05, decimals: 2)
+                }
                 Picker("Foreground side", selection: artwork.side) {
                     Text("Automatic").tag(ClosedNotchSideChoice.automatic)
                     Text("Left").tag(ClosedNotchSideChoice.left)
@@ -1542,6 +1555,23 @@ struct ClosedNotchSettingsView: View {
                 }
             }
 
+        case .topMusic:
+            Section("Listening history") {
+                let binding = Binding(get: { widgetStyle(item).wrappedValue.topMusic ?? TopMusicOptions() }, set: { widgetStyle(item).wrappedValue.topMusic = $0 })
+                Picker("Rank by", selection: binding.metric) { ForEach(TopMusicMetric.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                Picker("Group", selection: binding.grouping) { ForEach(TopMusicGrouping.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                Picker("Period", selection: binding.period) { ForEach(TopMusicPeriod.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                Picker("Display", selection: binding.presentation) { ForEach(TopMusicPresentation.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                if binding.wrappedValue.presentation != .spotlight {
+                    Stepper("Items: \(binding.wrappedValue.count)", value: binding.count, in: 1...5)
+                }
+                PreciseSlider(title: "Widget width", value: Binding(get: { widgetStyle(item).wrappedValue.width ?? 180 }, set: { widgetStyle(item).wrappedValue.width = $0 }), range: 80...320, step: 1, suffix: "pt")
+                Toggle("Show totals", isOn: binding.showValues)
+                Toggle("Show artist", isOn: binding.showArtist)
+                Text("Collected locally while Halo observes playback. A play counts after 30 seconds; paused time and sleep are excluded. Existing player history is not imported. All time includes up to two years of retained history.").font(.caption).foregroundStyle(.secondary)
+                Button("Clear listening history", role: .destructive) { MusicHistoryStore.shared.clear() }
+            }
+            closedWidgetAppearanceEditor(item)
         case .none:
             EmptyView()
 
@@ -2162,6 +2192,8 @@ struct ClosedNotchSettingsView: View {
             ]
         case .mirror:
             return [IconChoice(name: "Camera", symbol: "camera.fill")]
+        case .topMusic:
+            return [IconChoice(name: "Chart", symbol: "chart.bar.fill"), IconChoice(name: "Favorite", symbol: "heart.fill")]
         case .media, .visualizer, .none:
             return []
         }

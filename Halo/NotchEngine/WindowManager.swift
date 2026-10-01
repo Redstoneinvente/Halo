@@ -1674,6 +1674,12 @@ final class WindowManager {
             case .visualizer:
                 base = min(42, max(16, (options.visualizer ?? VisualizerOptions()).height))
 
+            case .topMusic:
+                let music = style.topMusic ?? TopMusicOptions()
+                let chartLines = 1 + (music.showValues ? 1 : 0) + (music.showArtist && music.grouping == .tracks ? 1 : 0)
+                let contentHeight = music.presentation == .chart ? lineHeight(textSize) + Double(chartLines - 1) * lineHeight(max(8, textSize * 0.7)) + 7 : lineHeight(textSize)
+                base = style.layout == .stacked || style.layout == .stackedReversed ? contentHeight + (style.iconSize ?? textSize) + (style.spacing ?? 2) : max(20, contentHeight)
+
             case .media:
                 base = max(20, lineHeight(textSize))
 
@@ -2445,6 +2451,9 @@ final class WindowManager {
                     width = 34 + 2 + 8 + trailing
                 }
                 return styledItemWidth(.battery, body: width)
+
+            case .topMusic:
+                return styledItemWidth(.topMusic, body: closedStyle(.topMusic).width ?? 180)
 
             case .media:
                 return mediaWidth()

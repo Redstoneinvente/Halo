@@ -757,6 +757,9 @@ struct ClosedNotchSlot: View {
                 Image(systemName: "powerplug")
             }
 
+        case .topMusic:
+            TopMusicClosedView(style: itemStyle, fontSize: textSize)
+                .frame(maxWidth: CGFloat(widgetContentWidth), maxHeight: CGFloat(widgetContentHeight)).clipped()
         case .media:
             if media.hasNowPlayingPresentation {
                 ClosedMediaView(media: media, options: closedMediaOptions, fontSize: textSize, availableWidth: closedMediaWidth, lowPower: system.lowPower)
@@ -1816,13 +1819,8 @@ private struct ClosedArtworkView: View {
         ZStack {
             Group {
                 if options.mode == .vinyl { vinylView }
-                else if let activeArtwork { artworkImage(activeArtwork).clipShape(RoundedRectangle(cornerRadius: 5)) }
-                else {
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(paletteColor.opacity(0.22))
-                        .overlay(Image(systemName: "photo").font(.system(size: max(8, options.size * 0.34))).foregroundStyle(paletteColor))
-                        .frame(width: options.size, height: options.size)
-                }
+                else { AlbumCoverWidgetView(artwork: activeArtwork, options: options, palette: media.artworkColors, playing: media.isPlaying, lowPower: lowPower) }
+
             }
             .id(key)
             .transition(reduceMotion ? .opacity : mediaOptions.resolvedChangeAnimation.transition)
@@ -2630,5 +2628,142 @@ struct PlaybackVisualizer: View {
             }
         }
 
+    }
+}
+struct AlbumCoverWidgetView: View {
+    let artwork: NSImage?
+    let options: ClosedArtworkOptions
+    let palette: [WidgetColor]
+    let playing: Bool
+    let lowPower: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var size: Double { options.size }
+    private var treatment: AlbumCoverStyle { options.coverStyle ?? .clean }
+    private var tint: Color { palette.first?.color ?? .cyan }
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion || lowPower || !playing || options.mode != .floating)) { timeline in
+            let floating = options.mode == .floating
+            let phase = reduceMotion || lowPower || !playing ? 0 : sin(timeline.date.timeIntervalSinceReferenceDate * 1.2)
+            ZStack {
+                if floating {
+                    RoundedRectangle(cornerRadius: size * 0.12).fill(tint.opacity(0.2))
+                        .frame(width: size * 0.75, height: size * 0.75)
+                        .rotation3DEffect(.degrees((options.coverTilt ?? 16) + 8), axis: (x: 0, y: 1, z: 0))
+                        .offset(x: size * 0.06, y: size * 0.06)
+                }
+                if treatment == .vinylPeek {
+                    VinylRecordView(artwork: artwork, size: size * 0.76, palette: palette, playing: playing, lowPower: lowPower, interactive: false)
+                        .offset(x: size * 0.12)
+                }
+                cover
+                    .frame(width: size * (treatment == .vinylPeek ? 0.76 : (floating ? 0.82 : 1)), height: size * (treatment == .vinylPeek ? 0.76 : (floating ? 0.82 : 1)))
+                    .rotation3DEffect(.degrees(floating ? (options.coverTilt ?? 16) + phase * 5 : 0), axis: (x: 0.25, y: 1, z: 0), perspective: 0.5)
+                    .offset(x: treatment == .vinylPeek ? -size * 0.1 : 0, y: floating ? phase * size * 0.035 : 0)
+                    .shadow(color: tint.opacity(options.coverGlow ?? 0.35), radius: size * 0.1)
+            }.frame(width: size, height: size)
+        }
+        .accessibilityLabel(options.mode == .floating ? "Floating album artwork" : treatment.rawValue + " album artwork")
+    }
+    private var cover: some View {
+        GeometryReader { geometry in
+            let edge = min(geometry.size.width, geometry.size.height)
+            let frame = treatment == .clean ? 0 : edge * (options.coverBorder ?? 0.07)
+            ZStack {
+                RoundedRectangle(cornerRadius: treatment == .jewel ? 2 : 4)
+                    .fill(treatment == .jewel ? Color.white.opacity(0.22) : Color.white)
+                Group {
+                    if let artwork { Image(nsImage: artwork).resizable().scaledToFill() }
+                    else { tint.opacity(0.35).overlay(Image(systemName: "music.note").foregroundStyle(.white)) }
+                }.frame(width: max(1, edge - frame * 2), height: max(1, edge - frame * 2))
+                    .clipShape(RoundedRectangle(cornerRadius: treatment == .jewel ? edge / 2 : (treatment == .clean ? 4 : 1)))
+                if treatment == .jewel {
+                    Circle().stroke(.white.opacity(0.35), lineWidth: 1).padding(edge * 0.1)
+                    Circle().fill(.black).frame(width: edge * 0.16, height: edge * 0.16)
+                        .overlay(Circle().stroke(.white.opacity(0.7), lineWidth: 1))
+                    RoundedRectangle(cornerRadius: 2).stroke(.white.opacity(0.7), lineWidth: 1)
+                    LinearGradient(colors: [.white.opacity(0.4), .clear, .white.opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    HStack { Rectangle().fill(.white.opacity(0.45)).frame(width: edge * 0.05); Spacer() }.padding(2)
+                }
+            }.frame(width: edge, height: edge).clipped()
+        }
+    }
+}
+
+private struct TopMusicClosedView: View {
+    let style: ClosedNotchWidgetStyle
+    let fontSize: Double
+    @ObservedObject private var history = MusicHistoryStore.shared
+    private var options: TopMusicOptions { (style.topMusic ?? TopMusicOptions()).normalized() }
+    private var ranks: [MusicRank] { MusicRanking.rank(history.listens, options: options) }
+    private func value(_ row: MusicRank) -> String {
+        options.metric == .plays ? "\(row.plays) plays" : (row.seconds < 60 ? "\(Int(row.seconds)) sec" : "\(Int(row.seconds / 60)) min")
+    }
+    var body: some View {
+        Group {
+            switch style.layout {
+            case .iconOnly: icon
+            case .textOnly: content
+            case .textAndIcon: HStack(spacing: style.spacing ?? 5) { content; icon }
+            case .stacked: VStack(spacing: style.spacing ?? 2) { icon; content }
+            case .stackedReversed: VStack(spacing: style.spacing ?? 2) { content; icon }
+            case .automatic, .iconAndText: HStack(spacing: style.spacing ?? 5) { icon; content }
+            }
+        }
+        .font(.system(size: fontSize, weight: (style.fontWeight ?? .semibold).swiftUIFontWeight))
+        .help("Top listened · \(options.period.rawValue) · \(options.metric.rawValue)")
+        .accessibilityElement(children: .combine)
+    }
+    private var icon: some View {
+        let color = style.iconColor?.color ?? style.textColor?.color ?? .cyan
+        let background = style.iconBackgroundColor?.color ?? color
+        let rounded = [.roundedSquare, .glassRounded, .outlineRounded].contains(style.resolvedIconStyle)
+        let outline = [.outlineCircle, .outlineRounded].contains(style.resolvedIconStyle)
+        return Image(systemName: style.iconSymbol ?? "chart.bar.fill")
+            .font(.system(size: style.iconSize ?? fontSize))
+            .foregroundStyle(color)
+            .padding(style.resolvedIconStyle == .plain ? 0 : style.resolvedIconPadding)
+            .background {
+                if style.resolvedIconStyle != .plain {
+                    RoundedRectangle(cornerRadius: rounded ? 5 : 40)
+                        .fill(background.opacity(outline ? 0 : style.resolvedIconBackgroundOpacity))
+                        .overlay(RoundedRectangle(cornerRadius: rounded ? 5 : 40).stroke(outline ? color : .clear, lineWidth: 1))
+                }
+            }
+    }
+    @ViewBuilder private var content: some View {
+        let rows = ranks
+        if rows.isEmpty { Text("Start listening").lineLimit(1) }
+        else {
+            switch options.presentation {
+            case .spotlight:
+                if let first = rows.first {
+                    HStack(spacing: style.spacing ?? 5) {
+                        Text(first.title + (options.showArtist && options.grouping == .tracks ? " · " + first.artist : "")).lineLimit(1)
+                        if options.showValues { Text(value(first)).font(.system(size: max(8, fontSize * 0.75))).opacity(0.7).lineLimit(1) }
+                    }
+                }
+            case .ticker:
+                Text(rows.enumerated().map { index, row in
+                    "\(index + 1). " + row.title + (options.showArtist && options.grouping == .tracks ? " · " + row.artist : "") + (options.showValues ? "  " + value(row) : "")
+                }.joined(separator: "   •   ")).lineLimit(1)
+            case .chart:
+                HStack(alignment: .center, spacing: style.spacing ?? 5) {
+                    ForEach(rows) { row in
+                        let maximum = options.metric == .plays ? Double(rows.first?.plays ?? 1) : rows.first?.seconds ?? 1
+                        let amount = options.metric == .plays ? Double(row.plays) : row.seconds
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.title).lineLimit(1)
+                            GeometryReader { geometry in
+                                Capsule().fill(.primary.opacity(0.15))
+                                Capsule().fill(style.iconColor?.color ?? style.textColor?.color ?? .cyan)
+                                    .frame(width: geometry.size.width * max(0.04, min(1, amount / max(1, maximum))))
+                            }.frame(height: 3)
+                            if options.showArtist && options.grouping == .tracks { Text(row.artist).font(.system(size: max(8, fontSize * 0.7))).opacity(0.7).lineLimit(1) }
+                            if options.showValues { Text(value(row)).font(.system(size: max(8, fontSize * 0.7))).opacity(0.7).lineLimit(1) }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

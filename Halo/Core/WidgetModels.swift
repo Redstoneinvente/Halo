@@ -2075,7 +2075,7 @@ extension WidgetStyle {
 }
 
 enum ClosedNotchItem: String, Codable, CaseIterable, Identifiable {
-    case none, clock, date, timer, battery, media, visualizer, mirror, files, activity
+    case none, clock, date, timer, battery, media, visualizer, mirror, files, activity, topMusic
     var id: String { rawValue }
 
     var title: String {
@@ -2085,6 +2085,7 @@ enum ClosedNotchItem: String, Codable, CaseIterable, Identifiable {
         case .date: return "Date"
         case .timer: return "Timer"
         case .battery: return "Battery"
+        case .topMusic: return "Top listened"
         case .media: return "Media"
         case .visualizer: return "Visualizer"
         case .mirror: return "Mirror"
@@ -2100,6 +2101,7 @@ enum ClosedNotchItem: String, Codable, CaseIterable, Identifiable {
         case .date: return "calendar"
         case .timer: return "timer"
         case .battery: return "battery.100"
+        case .topMusic: return "chart.bar.fill"
         case .media: return "music.note"
         case .visualizer: return "waveform"
         case .mirror: return "camera.fill"
@@ -2257,6 +2259,7 @@ struct ClosedNotchWidgetStyle: Codable, Equatable {
     var opacity = 1.0
 
     // Widget-specific controls. Optional presentation fields preserve old-profile decoding.
+    var topMusic: TopMusicOptions?
     var clockVisualStyle: ClockVisualStyle?
     var calendarPresentation: ClosedCalendarPresentation?
     var mirrorPresentation: ClosedMirrorPresentation?
@@ -2290,6 +2293,7 @@ struct ClosedNotchWidgetStyle: Codable, Equatable {
         guard numbers.allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
 
         var value = self
+        value.topMusic = topMusic?.normalized()
         if let fontSize { value.fontSize = min(30, max(8, fontSize)) }
         if let iconSize { value.iconSize = min(40, max(8, iconSize)) }
         if let spacing { value.spacing = min(24, max(0, spacing)) }
@@ -2344,7 +2348,7 @@ enum MediaOverflowMode: String, Codable, CaseIterable { case truncate, scale, ma
 enum LyricDisplayMode: String, Codable, CaseIterable { case line, focus, word }
 enum MediaChangeAnimation: String, Codable, CaseIterable { case none, fade, slide, lift, scale, blur }
 enum MediaGestureAction: String, Codable, CaseIterable { case none, playPause, next, previous, openPlayer }
-enum MediaArtworkMode: String, Codable, CaseIterable { case none, cover, background, vinyl }
+enum MediaArtworkMode: String, Codable, CaseIterable { case none, cover, background, vinyl, floating }
 struct ClosedMediaOptions: Codable, Equatable {
     var textMode: MediaTextMode = .titleArtist
     var overflow: MediaOverflowMode = .truncate
@@ -2408,6 +2412,10 @@ struct ClosedArtworkOptions: Codable, Equatable {
     var vinylRPM = 8.0
     var backgroundOpacity = 0.32
     var backgroundEnabled: Bool?
+    var coverStyle: AlbumCoverStyle?
+    var coverBorder: Double?
+    var coverTilt: Double?
+    var coverGlow: Double?
     var artworkOnly: Bool?
     var isArtworkOnly: Bool { artworkOnly ?? false }
     // Older profiles used mode == .background. New profiles can enable the background independently
@@ -2417,6 +2425,10 @@ struct ClosedArtworkOptions: Codable, Equatable {
         guard [size, padding, margin, vinylRPM, backgroundOpacity].allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
         var v = self
         if v.mode == .none && !v.usesBackgroundArtwork { v.enabled = false }
+        guard [coverBorder, coverTilt, coverGlow].compactMap({ $0 }).allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
+        v.coverBorder = coverBorder.map { min(0.18, max(0, $0)) }
+        v.coverTilt = coverTilt.map { min(30, max(-30, $0)) }
+        v.coverGlow = coverGlow.map { min(1, max(0, $0)) }
         v.size = min(72, max(14, size))
         v.padding = min(24, max(0, padding))
         v.margin = min(48, max(0, margin))
@@ -2724,5 +2736,85 @@ extension ClosedNotchOptions {
         color = c.haloDecode(WidgetColor.self, forKey: .color, default: fallback.color)
         animation = c.haloDecode(PlaybackAnimation.self, forKey: .animation, default: fallback.animation)
         animate = c.haloDecode(Bool.self, forKey: .animate, default: fallback.animate)
+    }
+}
+
+
+enum AlbumCoverStyle: String, Codable, CaseIterable { case clean = "Clean", sleeve = "Framed sleeve", vinylPeek = "Vinyl peek", jewel = "Jewel case" }
+enum TopMusicPeriod: String, Codable, CaseIterable { case today = "Today", week = "7 days", month = "30 days", all = "All time" }
+enum TopMusicMetric: String, Codable, CaseIterable { case plays = "Plays", time = "Listening time" }
+enum TopMusicGrouping: String, Codable, CaseIterable { case tracks = "Tracks", artists = "Artists" }
+enum TopMusicPresentation: String, Codable, CaseIterable { case spotlight = "Spotlight", chart = "Mini chart", ticker = "Inline list" }
+struct TopMusicOptions: Codable, Equatable {
+    var period: TopMusicPeriod = .week
+    var metric: TopMusicMetric = .time
+    var grouping: TopMusicGrouping = .tracks
+    var presentation: TopMusicPresentation = .spotlight
+    var count = 3
+    var showValues = true
+    var showArtist = true
+    func normalized() -> Self { var v = self; v.count = min(5, max(1, count)); return v }
+}
+struct MusicListen: Codable, Equatable {
+    var title: String
+    var artist: String
+    var started: Date
+    var seconds: Double
+    var play: Bool
+}
+struct MusicRank: Identifiable, Equatable {
+    var id: String
+    var title: String
+    var artist: String
+    var plays: Int
+    var seconds: Double
+}
+enum MusicRanking {
+    static func rank(_ listens: [MusicListen], options: TopMusicOptions, now: Date = Date(), calendar: Calendar = .current) -> [MusicRank] {
+        let start: Date
+        switch options.period {
+        case .today: start = calendar.startOfDay(for: now)
+        case .week: start = now.addingTimeInterval(-7 * 86400)
+        case .month: start = now.addingTimeInterval(-30 * 86400)
+        case .all: start = .distantPast
+        }
+        var ranks: [String: MusicRank] = [:]
+        for listen in listens where listen.started >= start && listen.started <= now && listen.seconds.isFinite && listen.seconds >= 0 {
+            let artist = listen.artist.isEmpty ? "Unknown artist" : listen.artist
+            let key = options.grouping == .artists ? artist : listen.title + "\u{1f}" + artist
+            var row = ranks[key] ?? MusicRank(id: key, title: options.grouping == .artists ? artist : listen.title, artist: artist, plays: 0, seconds: 0)
+            row.plays += listen.play ? 1 : 0
+            row.seconds += listen.seconds
+            ranks[key] = row
+        }
+        return ranks.values.filter { options.metric == .plays ? $0.plays > 0 : $0.seconds > 0 }.sorted {
+            let a = options.metric == .plays ? Double($0.plays) : $0.seconds
+            let b = options.metric == .plays ? Double($1.plays) : $1.seconds
+            return a == b ? $0.id < $1.id : a > b
+        }.prefix(options.normalized().count).map { $0 }
+    }
+}
+
+
+/// Samples are bounded so a suspended app cannot count sleep as playback.
+struct MusicListeningAccumulator {
+    private var lastDate: Date?
+    private var lastKey: String?
+    private var sessionKey: String?
+    private var sessionSeconds = 0.0
+    private var counted = false
+    mutating func sample(title: String, artist: String, key: String, playing: Bool, at date: Date) -> MusicListen? {
+        defer { lastDate = date; lastKey = playing ? key : nil }
+        guard playing, !title.isEmpty, title != "Connect a player", title != "Playing audio" else { return nil }
+        if sessionKey != key || (lastDate.map { date.timeIntervalSince($0) > 12 } ?? false) {
+            sessionKey = key; sessionSeconds = 0; counted = false
+        }
+        guard lastKey == key, let lastDate else { return nil }
+        let elapsed = date.timeIntervalSince(lastDate)
+        guard elapsed > 0, elapsed <= 12 else { return nil }
+        sessionSeconds += elapsed
+        let play = !counted && sessionSeconds >= 30
+        if play { counted = true }
+        return MusicListen(title: title, artist: artist, started: date, seconds: elapsed, play: play)
     }
 }

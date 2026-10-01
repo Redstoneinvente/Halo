@@ -129,3 +129,12 @@ A footprint may change presentation without changing size. Examples already supp
 The Visual Workspace inspector must never expose a control that the selected widget renderer does not consume. Adaptive widgets use module capability flags for global controls such as Maximum Items and Show Controls. Legacy per-element styling is hidden for adaptive widgets unless the renderer actually supports it.
 
 Element availability is also footprint-aware. If an element is supported by the widget but cannot fit the selected footprint, its toggle is disabled and an orange warning explains the minimum/shape requirement. The renderer uses the same availability contract, so editor state and runtime output cannot disagree. Calendar is intentionally permission-tolerant: date, week and month navigation always work; EventKit permission only enriches the widget with personal events.
+
+
+## Album treatments and top listened
+
+Closed notch → Media → Artwork layers now offers **Album cover**, **Rotating vinyl**, and **Floating 3D**. Album cover and Floating 3D share Clean, Framed sleeve, Vinyl peek, and Jewel case treatments. Frame thickness, artwork glow, size, padding, and margin are adjustable; Floating 3D adds perspective and subtle motion. The jewel case shows a disc, spindle and plastic reflection. Floating motion stops for Reduce Motion, Low Power Mode, and paused playback. Vinyl Studio remains the shared record renderer, including the sleeve's vinyl peek.
+
+Choose **Top listened** for either closed-notch slot. Rank tracks or artists by observed listening time or plays over Today, 7 days, 30 days, or All time. Choose Spotlight, Mini chart, or Inline list, one to five items where appropriate, artist labels, totals, width, typography, icon, and the existing widget background/border controls. Size fitting reserves its requested width and chart height. Very narrow slots truncate text.
+
+History is collected locally from the existing media service while Halo runs. It does not import Spotify/Apple Music account history. Samples arrive about every five seconds; pause and sleep gaps are excluded. A play is counted once after 30 seconds in an observed track session, so short skips do not count. Repeats without an observable track/session change are not a separate play. Rolling boundaries use minute buckets. History retains up to two years / 200,000 records and is saved every 15 seconds. Clear listening history removes it from this Mac. Profiles carry display preferences, not listening history. Empty history shows “Start listening”.

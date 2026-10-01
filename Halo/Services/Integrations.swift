@@ -476,6 +476,14 @@ final class AudioService: ObservableObject {
 
 @MainActor
 final class MediaService: ObservableObject {
+    private var listeningTimer: AnyCancellable?
+    init() {
+        listeningTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect().sink { [weak self] date in
+            guard let self else { return }
+            MusicHistoryStore.shared.observe(title: self.title, artist: self.artist, key: (self.connectedApp ?? "external") + "|" + self.trackID + "|" + self.title + "|" + self.artist, playing: self.isPlaying, at: date)
+        }
+    }
+
     @Published var title = "Connect a player"
     @Published var artist = "Apple Music, Spotify or Safari"
     @Published var error: String?
@@ -1026,5 +1034,44 @@ final class HotkeyService {
     func stop() {
         if let hotkey { UnregisterEventHotKey(hotkey) }; hotkey = nil
         if let handler { RemoveEventHandler(handler) }; handler = nil
+    }
+}
+
+@MainActor
+final class MusicHistoryStore: ObservableObject {
+    static let shared = MusicHistoryStore()
+    @Published private(set) var listens: [MusicListen] = []
+    private var accumulator = MusicListeningAccumulator()
+    private var lastSaved = Date.distantPast
+    private var lastPruned = Date.distantPast
+    private let persistenceQueue = DispatchQueue(label: "Halo.MusicHistory.Persistence", qos: .utility)
+    private let storageKey = "HaloMusicHistory.v1"
+    private init() {
+        if let data = UserDefaults.standard.data(forKey: storageKey), let saved = try? JSONDecoder().decode([MusicListen].self, from: data) { listens = saved }
+    }
+    func observe(title: String, artist: String, key: String, playing: Bool, at date: Date) {
+        guard let sample = accumulator.sample(title: title, artist: artist, key: key, playing: playing, at: date) else { return }
+        // Minute buckets keep rolling-period boundaries accurate to one minute without
+        // retaining a record for every five-second polling interval.
+        let bucket = Date(timeIntervalSince1970: floor(date.timeIntervalSince1970 / 60) * 60)
+        if let index = listens.lastIndex(where: { $0.title == title && $0.artist == artist && $0.started == bucket && !$0.play }) {
+            listens[index].seconds += sample.seconds
+        } else { listens.append(MusicListen(title: title, artist: artist, started: bucket, seconds: sample.seconds, play: false)) }
+        if sample.play { listens.append(MusicListen(title: title, artist: artist, started: date, seconds: 0, play: true)) }
+        // Bound the locally retained history to two years and 200,000 records.
+        if date.timeIntervalSince(lastPruned) >= 3600 || listens.count > 200_000 {
+            listens = Array(listens.filter { $0.started >= date.addingTimeInterval(-730 * 86400) }.suffix(200_000))
+            lastPruned = date
+        }
+        if date.timeIntervalSince(lastSaved) >= 15 || sample.play { save(); lastSaved = date }
+    }
+    func clear() { listens = []; accumulator = MusicListeningAccumulator(); save() }
+    private func save() {
+        let snapshot = listens
+        let key = storageKey
+        // Serialize writes in order, including Clear, without blocking notch rendering.
+        persistenceQueue.async {
+            if let data = try? JSONEncoder().encode(snapshot) { UserDefaults.standard.set(data, forKey: key) }
+        }
     }
 }

@@ -1470,3 +1470,52 @@ final class SimpleNotchLayoutTests: XCTestCase {
     }
 
 }
+
+
+final class MusicWidgetTests: XCTestCase {
+    func testRankingsAndPeriods() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let rows = [MusicListen(title: "A", artist: "One", started: now.addingTimeInterval(-60), seconds: 100, play: true),
+                    MusicListen(title: "B", artist: "One", started: now.addingTimeInterval(-120), seconds: 200, play: false),
+                    MusicListen(title: "C", artist: "Two", started: now.addingTimeInterval(-40 * 86400), seconds: 900, play: true)]
+        var options = TopMusicOptions()
+        XCTAssertEqual(MusicRanking.rank(rows, options: options, now: now).first?.title, "B")
+        options.metric = .plays
+        XCTAssertEqual(MusicRanking.rank(rows, options: options, now: now).first?.title, "A")
+        options.grouping = .artists
+        XCTAssertEqual(MusicRanking.rank(rows, options: options, now: now).first?.seconds, 300)
+        options.period = .all; options.metric = .time
+        XCTAssertEqual(MusicRanking.rank(rows, options: options, now: now).first?.title, "Two")
+        options.count = 99
+        XCTAssertEqual(options.normalized().count, 5)
+    }
+    func testSamplesExcludePauseSleepAndCountOnce() {
+        var accumulator = MusicListeningAccumulator()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func sample(_ offset: Double, _ playing: Bool = true, _ key: String = "a") -> MusicListen? {
+            accumulator.sample(title: "A", artist: "One", key: key, playing: playing, at: now.addingTimeInterval(offset))
+        }
+        XCTAssertNil(sample(0))
+        var plays = 0
+        for offset in stride(from: 5.0, through: 40.0, by: 5) { if sample(offset)?.play == true { plays += 1 } }
+        XCTAssertEqual(plays, 1)
+        XCTAssertNil(sample(45, false))
+        XCTAssertNil(sample(50))
+        XCTAssertEqual(sample(55)?.seconds, 5)
+        XCTAssertNil(sample(1000))
+        XCTAssertNil(sample(1005, true, "b"))
+        XCTAssertEqual(sample(1010, true, "b")?.seconds, 5)
+    }
+    func testOldArtworkAndWidgetSettingsDecode() throws {
+        let artwork = try JSONDecoder().decode(ClosedArtworkOptions.self, from: Data("{\"enabled\":true,\"mode\":\"cover\",\"side\":\"automatic\",\"size\":28,\"padding\":0,\"margin\":7,\"vinylRPM\":8,\"backgroundOpacity\":0.32}".utf8))
+        XCTAssertNil(artwork.coverStyle)
+        var value = ClosedNotchWidgetStyle(); value.topMusic = TopMusicOptions()
+        let encoded = try JSONEncoder().encode(value)
+        XCTAssertEqual(try JSONDecoder().decode(ClosedNotchWidgetStyle.self, from: encoded), value)
+        var old = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        old.removeValue(forKey: "topMusic")
+        XCTAssertNil(try JSONDecoder().decode(ClosedNotchWidgetStyle.self, from: JSONSerialization.data(withJSONObject: old)).topMusic)
+        var invalid = artwork; invalid.coverTilt = .infinity
+        XCTAssertThrowsError(try invalid.validated())
+    }
+}
