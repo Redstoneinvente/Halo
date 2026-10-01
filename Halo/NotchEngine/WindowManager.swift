@@ -856,7 +856,7 @@ final class WindowManager {
         var contextCompactHeightSubscription: AnyCancellable?
         var reviewPromptCompactHeightSubscription: AnyCancellable?
         var appShortcutDragSubscription: AnyCancellable?
-    var appShortcutDragBaseTarget: CGRect?
+        var appShortcutDragBaseTarget: CGRect?
         var refreshDropCIRegistration: (() -> Void)?
         var pixelPalCollapseWork: DispatchWorkItem?
         var hoverOpeningCompletionWork: DispatchWorkItem?
@@ -3754,7 +3754,7 @@ final class WindowManager {
                 }
                 host.state.appShortcutDragStateDidChange = { [weak self, weak host] active in
                     guard let host else { return }
-                    host.appShortcutDragActive = active
+                    host.state.appShortcutDragActive = active
                     if !active, let target = host.appShortcutDragBaseTarget, let geometry = host.geometry {
                         host.appShortcutDragBaseTarget = nil
                         host.targetFrame = target
