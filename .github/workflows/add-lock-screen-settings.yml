@@ -1,6 +1,10 @@
 name: Add Lock Screen Settings
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/lock-screen-settings-trigger.txt'
   issues:
     types: [opened]
   workflow_dispatch:
@@ -10,7 +14,7 @@ permissions:
 
 jobs:
   apply:
-    if: github.event_name == 'workflow_dispatch' || github.event.issue.title == 'Apply Lock Screen Settings'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.issue.title == 'Apply Lock Screen Settings'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
