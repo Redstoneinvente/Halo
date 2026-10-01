@@ -184,6 +184,8 @@ final class SurfaceState: ObservableObject {
     @Published var contextPreferredSize: CGSize?
     @Published var contextPreferredCompactWidth: CGFloat?
     @Published var contextPreferredCompactHeight: CGFloat?
+    /// Temporary compact-size boost while an app bundle is being dragged toward the notch.
+    @Published var appShortcutDragActive = false
     /// Non-CI compact-height request used by the review nudge. Keep this separate from
     /// contextPreferredCompactHeight because Simple mode deliberately clears CI sizing.
     @Published var reviewPromptPreferredCompactHeight: CGFloat?
@@ -200,6 +202,13 @@ final class SurfaceState: ObservableObject {
     var hoverExpandTask: Task<Void, Never>?
     var dropExitTask: Task<Void, Never>?
     var editingGeometry = false
+    var appShortcutDragStateDidChange: ((Bool) -> Void)?
+
+    func setAppShortcutDragActive(_ active: Bool) {
+        guard appShortcutDragActive != active else { return }
+        appShortcutDragActive = active
+        appShortcutDragStateDidChange?(active)
+    }
 
     func beginExpandedPresentation() {
         if pixelPalCloseGateActive { pixelPalCloseGateActive = false }
@@ -469,7 +478,14 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     var dragLocationHandler: ((CGPoint?) -> Void)?
     var dropHandler: (([URL]) -> Bool)?
     var appShortcutDropHandler: (([URL], CGPoint, Bool) -> Bool)?
+    var appShortcutDragStateHandler: ((Bool) -> Void)?
     private var appShortcutDragURLs: [URL]?
+
+    private func finishAppShortcutDrag() {
+        guard appShortcutDragURLs != nil else { return }
+        appShortcutDragURLs = nil
+        appShortcutDragStateHandler?(false)
+    }
 
     /// The normal Halo runtime remains the outer boundary for Halo's surface-wide drag source.
     /// Edition-specific drag restrictions, if any, belong in HaloFeatureAccess later.
@@ -513,7 +529,7 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
             unregisterDraggedTypes()
             fileDragRegistered = false
             rejectSurfaceDrag()
-            appShortcutDragURLs = nil
+            finishAppShortcutDrag()
             return
         }
         guard !fileDragRegistered else { return }
@@ -550,10 +566,13 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
         guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); return [] }
         let urls = fileURLs(sender)
         guard !urls.isEmpty else { return super.draggingEntered(sender) }
-        if urls.allSatisfy({ $0.pathExtension.lowercased() == "app" }),
-           let point = dragScreenPoint(sender),
-           appShortcutDropHandler?(urls, point, false) == true {
+        if !urls.isEmpty && urls.allSatisfy({ $0.pathExtension.lowercased() == "app" }) {
             appShortcutDragURLs = urls
+            appShortcutDragStateHandler?(true)
+            if let point = dragScreenPoint(sender),
+               appShortcutDropHandler?(urls, point, false) == true {
+                return .copy
+            }
             return .copy
         }
 
@@ -567,19 +586,26 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); appShortcutDragURLs = nil; return [] }
-        if appShortcutDragURLs != nil { return .copy }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); finishAppShortcutDrag(); return [] }
+        if appShortcutDragURLs != nil {
+            if let point = dragScreenPoint(sender),
+               appShortcutDropHandler?(appShortcutDragURLs ?? [], point, false) == true {
+                return .copy
+            }
+            return .copy
+        }
         let candidateURLs = fileURLs(sender)
-        if candidateURLs.allSatisfy({ $0.pathExtension.lowercased() == "app" }),
-           !candidateURLs.isEmpty,
-           let point = dragScreenPoint(sender),
-           appShortcutDropHandler?(candidateURLs, point, false) == true {
+        if !candidateURLs.isEmpty && candidateURLs.allSatisfy({ $0.pathExtension.lowercased() == "app" }) {
             if surfaceDragActive {
                 dragLocationHandler?(nil)
                 _ = dragStateHandler?(false, [])
                 surfaceDragActive = false
             }
             appShortcutDragURLs = candidateURLs
+            appShortcutDragStateHandler?(true)
+            if let point = dragScreenPoint(sender) {
+                _ = appShortcutDropHandler?(candidateURLs, point, false)
+            }
             return .copy
         }
         if surfaceDragActive {
@@ -590,8 +616,8 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); appShortcutDragURLs = nil; return }
-        if appShortcutDragURLs != nil { appShortcutDragURLs = nil; return }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); finishAppShortcutDrag(); return }
+        if appShortcutDragURLs != nil { finishAppShortcutDrag(); return }
         if surfaceDragActive {
             dragLocationHandler?(nil)
             _ = dragStateHandler?(false, [])
@@ -602,9 +628,9 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); appShortcutDragURLs = nil; return false }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); finishAppShortcutDrag(); return false }
         if let urls = appShortcutDragURLs {
-            defer { appShortcutDragURLs = nil }
+            defer { finishAppShortcutDrag() }
             guard let point = dragScreenPoint(sender) else { return false }
             return appShortcutDropHandler?(urls, point, true) ?? false
         }
@@ -620,8 +646,8 @@ final class HaloDropHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func concludeDragOperation(_ sender: NSDraggingInfo?) {
-        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); appShortcutDragURLs = nil; return }
-        if appShortcutDragURLs != nil { appShortcutDragURLs = nil; return }
+        guard hasSurfaceRuntimeAccess else { rejectSurfaceDrag(); finishAppShortcutDrag(); return }
+        if appShortcutDragURLs != nil { finishAppShortcutDrag(); return }
         if surfaceDragActive {
             dragLocationHandler?(nil)
             _ = dragStateHandler?(false, [])
@@ -829,6 +855,8 @@ final class WindowManager {
         var contextCompactSizeSubscription: AnyCancellable?
         var contextCompactHeightSubscription: AnyCancellable?
         var reviewPromptCompactHeightSubscription: AnyCancellable?
+        var appShortcutDragSubscription: AnyCancellable?
+    var appShortcutDragBaseTarget: CGRect?
         var refreshDropCIRegistration: (() -> Void)?
         var pixelPalCollapseWork: DispatchWorkItem?
         var hoverOpeningCompletionWork: DispatchWorkItem?
@@ -3724,11 +3752,39 @@ final class WindowManager {
 
                     return false
                 }
+                host.state.appShortcutDragStateDidChange = { [weak self, weak host] active in
+                    guard let host else { return }
+                    host.appShortcutDragActive = active
+                    if !active, let target = host.appShortcutDragBaseTarget, let geometry = host.geometry {
+                        host.appShortcutDragBaseTarget = nil
+                        host.targetFrame = target
+                        var motion = geometry.appearance.surface
+                        motion.opening = .resize
+                        motion.closing = .resize
+                        motion.duration = min(0.28, max(0.12, motion.duration))
+                        host.animator.move(panel: host.panel, state: host.state, target: target, options: motion,
+                                           preset: .smooth,
+                                           animations: host.state.theme.animations && !host.state.editingGeometry,
+                                           opening: false, style: geometry.style, liveViewportResize: true,
+                                           synchronizeClosedGeometry: true,
+                                           closedCameraFrame: self?.physicalCameraFrame(for: geometry))
+                    }
+                }
+                view.appShortcutDragStateHandler = { [weak host] active in
+                    host?.state.setAppShortcutDragActive(active)
+                }
                 view.appShortcutDropHandler = { [weak host] urls, point, commit in
                     guard let host, let geometry = host.geometry else { return false }
                     let settingsStore = NotchBubbleSettingsStore.shared
                     var settings = settingsStore.settings.normalized()
-                    guard geometry.frame(expanded: false).insetBy(dx: -12, dy: -8).contains(point) else { return false }
+                    let closedTarget = host.state.appShortcutDragActive
+                        ? self.adjustedClosedFrame(
+                            host: host,
+                            requestedWidth: max(geometry.frame(expanded: false).width, host.state.contextPreferredCompactWidth ?? 0) + min(48, max(28, geometry.frame(expanded: false).width * 0.16)),
+                            requestedHeight: max(geometry.frame(expanded: false).height, host.state.reviewPromptPreferredCompactHeight ?? host.state.contextPreferredCompactHeight ?? 0) + 10
+                        )
+                        : geometry.frame(expanded: false)
+                    guard closedTarget.insetBy(dx: -20, dy: -12).contains(point) else { return false }
                     let shortcuts = urls.compactMap { url -> NotchAppShortcut? in
                         guard let bundle = Bundle(url: url), let bundleID = bundle.bundleIdentifier else { return nil }
                         let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
@@ -3908,6 +3964,47 @@ final class WindowManager {
                                        synchronizeClosedGeometry: true,
                                        closedCameraFrame: self.physicalCameraFrame(for: geometry))
                 }
+
+                host.appShortcutDragSubscription = host.state.$appShortcutDragActive
+                    .removeDuplicates()
+                    .receive(on: DispatchQueue.main)
+                    .sink { [weak self, weak host] active in
+                        guard let self, let host, let geometry = host.geometry,
+                              !host.state.expanded, !host.state.presentationExpanded else { return }
+                        let base = geometry.frame(expanded: false)
+                        if active { host.appShortcutDragBaseTarget = self.targetFrame(host: host, expanded: false) }
+                        let widthBoost: CGFloat = min(48, max(28, base.width * 0.16))
+                        let heightBoost: CGFloat = 10
+                        let existingWidth = max(base.width, host.state.contextPreferredCompactWidth ?? 0)
+                        let existingHeight = max(
+                            base.height,
+                            host.state.reviewPromptPreferredCompactHeight ?? host.state.contextPreferredCompactHeight ?? 0
+                        )
+                        let requestedWidth = active ? existingWidth + widthBoost : host.state.contextPreferredCompactWidth
+                        let requestedHeight = active ? existingHeight + heightBoost : (host.state.reviewPromptPreferredCompactHeight ?? host.state.contextPreferredCompactHeight)
+                        let target = active
+                            ? self.adjustedClosedFrame(host: host, requestedWidth: requestedWidth, requestedHeight: requestedHeight)
+                            : (host.appShortcutDragBaseTarget ?? self.targetFrame(host: host, expanded: false))
+                        guard host.targetFrame != target else { return }
+                        host.targetFrame = target
+                        var motion = geometry.appearance.surface
+                        motion.opening = .resize
+                        motion.closing = .resize
+                        motion.duration = min(0.28, max(0.12, motion.duration))
+                        host.animator.move(
+                            panel: host.panel,
+                            state: host.state,
+                            target: target,
+                            options: motion,
+                            preset: .smooth,
+                            animations: host.state.theme.animations && !host.state.editingGeometry,
+                            opening: active,
+                            style: geometry.style,
+                            liveViewportResize: true,
+                            synchronizeClosedGeometry: true,
+                            closedCameraFrame: self.physicalCameraFrame(for: geometry)
+                        )
+                    }
 
                 host.reviewPromptCompactHeightSubscription = host.state.$reviewPromptPreferredCompactHeight.dropFirst().removeDuplicates(by: { lhs, rhs in
                     switch (lhs, rhs) {
