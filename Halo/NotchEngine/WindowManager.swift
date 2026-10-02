@@ -926,7 +926,6 @@ final class WindowManager {
     private var lockScreenPreviewGeneration = 0
     private var pendingWakeActivation = false
     private var lockScreenPresenceRefreshWork: DispatchWorkItem?
-    private var lockScreenPresenceReadyAt = Date.distantPast
     private var lastLockScreenPresenceSignature = ""
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
@@ -1414,9 +1413,6 @@ final class WindowManager {
     private func handleLockScreenSessionResigned() {
         guard !lockScreenSessionSuspended else { return }
         lockScreenSessionSuspended = true
-        // Keep every notification refresh out of the desktop -> secure-session handoff.
-        // The notification daemon can then present it after the Lock Screen is actually visible.
-        lockScreenPresenceReadyAt = Date().addingTimeInterval(1.0)
         lockScreenUnlockWork?.cancel()
         lockScreenUnlockWork = nil
         lockScreenExpandedSnapshot = hosts.mapValues { $0.state.expanded }
@@ -1430,7 +1426,6 @@ final class WindowManager {
             haptic: preferences.lockHaptic,
             id: "lockScreen.lock"
         )
-        refreshLockScreenPresenceIfNeeded(force: true)
 
         for host in hosts.values {
             host.state.collapseTask?.cancel()
@@ -1443,7 +1438,6 @@ final class WindowManager {
     private func handleLockScreenSessionBecameActive() {
         guard lockScreenSessionSuspended else { return }
         lockScreenSessionSuspended = false
-        lockScreenPresenceReadyAt = .distantPast
         clearLockScreenPresence()
         lockScreenUnlockWork?.cancel()
 
@@ -1495,6 +1489,12 @@ final class WindowManager {
         let shouldRunActivation = preferences.runActivationSequence || pendingWakeActivation
         pendingWakeActivation = false
         lockScreenExpandedSnapshot.removeAll()
+
+        let summaryDelay = max(0.25, preferences.unlockDuration + 0.1)
+        DispatchQueue.main.asyncAfter(deadline: .now() + summaryDelay) { [weak self] in
+            self?.refreshLockScreenPresenceIfNeeded(force: true, allowUnlocked: true)
+        }
+
         guard shouldRunActivation else { return }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + preferences.unlockDuration) { [weak self] in
@@ -1583,34 +1583,33 @@ final class WindowManager {
     private static let lockScreenPresenceNotificationID = "com.redstoneinvente.halo.lock-screen-presence"
 
     private func scheduleLockScreenPresenceRefresh() {
-        guard lockScreenSessionSuspended else { return }
+        // The secure Lock Screen is system-owned. Context changes while locked are
+        // intentionally sampled only once Halo regains the session after unlock.
         lockScreenPresenceRefreshWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            self?.refreshLockScreenPresenceIfNeeded()
-        }
-        lockScreenPresenceRefreshWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
+        lockScreenPresenceRefreshWork = nil
     }
 
-    private func refreshLockScreenPresenceIfNeeded(force: Bool = false, preview: Bool = false) {
+    private func refreshLockScreenPresenceIfNeeded(
+        force: Bool = false,
+        preview: Bool = false,
+        allowUnlocked: Bool = false
+    ) {
         let preferences = LockScreenPresencePreferences.current()
         guard preferences.enabled else {
             clearLockScreenPresence()
             return
         }
-        guard preview || lockScreenSessionSuspended else { return }
+        guard preview || allowUnlocked else { return }
 
-        let deliveryDelay = preview ? 0 : max(0, lockScreenPresenceReadyAt.timeIntervalSinceNow)
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
             let authorized = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
-            let lockScreenAllowed = settings.lockScreenSetting == .enabled
-            guard authorized, preview || lockScreenAllowed else { return }
+            guard authorized else { return }
             Task { @MainActor [weak self] in
                 self?.deliverLockScreenPresence(
                     preferences: preferences,
                     force: force,
                     preview: preview,
-                    deliveryDelay: deliveryDelay
+                    deliveryDelay: 0
                 )
             }
         }
@@ -1633,8 +1632,8 @@ final class WindowManager {
         content.title = card.title
         content.subtitle = card.subtitle
         content.body = card.body
-        content.threadIdentifier = "halo.lock-screen-presence"
-        content.categoryIdentifier = "HALO_LOCK_SCREEN_PRESENCE"
+        content.threadIdentifier = "halo.after-unlock-summary"
+        content.categoryIdentifier = "HALO_AFTER_UNLOCK_SUMMARY"
         if preferences.showArtwork, let artwork = card.artwork,
            let attachment = lockScreenPresenceArtworkAttachment(artwork) {
             content.attachments = [attachment]
@@ -1695,9 +1694,9 @@ final class WindowManager {
         guard preview else { return nil }
         return LockScreenPresenceCard(
             kind: "preview",
-            title: "Halo Lock Screen",
-            subtitle: "Contextual presence",
-            body: "Start music, a timer, a stopwatch, or a Live Activity and Halo will surface the highest-priority context here.",
+            title: "Halo Summary",
+            subtitle: "After Unlock",
+            body: "Start music, a timer, a stopwatch, or a Live Activity and Halo will surface the highest-priority context after you unlock.",
             artwork: nil
         )
     }
