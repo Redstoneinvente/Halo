@@ -344,7 +344,7 @@ struct SettingsView: View {
                         Text(section ?? "General").font(.title2.bold())
                         Text(isFullOnlySection(section ?? "")
                              ? "Available with Halo Full"
-                             : (section == "Lock Screen" ? "How Halo behaves when your Mac is locked" : (section == "Visual Workspace Editor" ? "Design the active Visual Workspace" : "Changes are saved automatically")))
+                             : (section == "Lock Screen" ? "Customize locking, unlocking, and the after-unlock summary" : (section == "Visual Workspace Editor" ? "Design the active Visual Workspace" : "Changes are saved automatically")))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -8589,8 +8589,8 @@ private struct LockScreenSettingsPane: View {
 
     var body: some View {
         Group {
-            Section("Lock Screen Presence") {
-                Toggle("Show Halo status on the Lock Screen", isOn: $presenceEnabled)
+            Section("After Unlock Summary") {
+                Toggle("Show a Halo summary after unlocking", isOn: $presenceEnabled)
                     .onChange(of: presenceEnabled) { enabled in
                         if enabled { workspace.enableNotifications() }
                     }
@@ -8611,29 +8611,19 @@ private struct LockScreenSettingsPane: View {
                             Text("Hide track details").tag("hidden")
                         }
                         Toggle("Album artwork", isOn: $presenceArtwork)
-                            .disabled(presenceMediaPrivacy == "hidden")
                     }
 
                     Toggle("Active timer", isOn: $presenceTimer)
                     Toggle("Stopwatch", isOn: $presenceStopwatch)
                     Toggle("Live Activities", isOn: $presenceActivities)
 
-                    Button("Preview Lock Screen card") {
+                    Button("Preview summary notification") {
                         workspace.enableNotifications()
                         NotificationCenter.default.post(name: .init("HaloPreviewLockScreenPresence"), object: nil)
                     }
                 }
 
-                Text("Halo uses a silent macOS notification for this card. macOS still controls whether Halo notifications are allowed to appear on the Lock Screen in System Settings. The card disappears when you unlock.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Section("Lock Screen customization") {
-                Toggle("Customize lock and unlock transitions", isOn: $effectsEnabled)
-
-                Text("Halo customizes the handoff between your desktop session and the macOS Lock Screen. The secure Lock Screen itself remains owned by macOS.")
+                Text("macOS keeps the secure Lock Screen system-owned, so Halo cannot place custom notch UI there. Instead, Halo can surface the most relevant music, timer, stopwatch, or Live Activity context immediately after you unlock.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
