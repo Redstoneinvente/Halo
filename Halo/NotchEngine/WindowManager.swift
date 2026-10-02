@@ -835,6 +835,23 @@ final class SurfaceAnimator {
     }
 }
 
+private final class HaloAfterUnlockNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = HaloAfterUnlockNotificationDelegate()
+    private let summaryIdentifier = "com.redstoneinvente.halo.lock-screen-presence"
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        if notification.request.identifier == summaryIdentifier {
+            completionHandler([.banner, .list])
+        } else {
+            completionHandler([])
+        }
+    }
+}
+
 @MainActor
 final class WindowManager {
     @MainActor private final class Host {
@@ -926,6 +943,9 @@ final class WindowManager {
     private var lockScreenPreviewGeneration = 0
     private var pendingWakeActivation = false
     private var lockScreenPresenceRefreshWork: DispatchWorkItem?
+#if HALO_DIRECT
+    private var lockScreenDistributedObservers: [NSObjectProtocol] = []
+#endif
     private var lastLockScreenPresenceSignature = ""
     private var hosts: [String: Host] = [:]
     private var subscriptions = Set<AnyCancellable>()
@@ -980,6 +1000,8 @@ final class WindowManager {
     }
 
     func start() {
+        UNUserNotificationCenter.current().delegate = HaloAfterUnlockNotificationDelegate.shared
+
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reconcile() }.store(in: &subscriptions)
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
@@ -993,14 +1015,54 @@ final class WindowManager {
             .store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .init("HaloPreviewActivationSequence"))
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.previewActivation() }.store(in: &subscriptions)
+        // Public session-switch notifications remain useful for Fast User Switching.
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.sessionDidResignActiveNotification)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.handleLockScreenSessionResigned() }
+            .sink { [weak self] _ in self?.handleLockScreenSessionResigned(source: "session-resigned") }
             .store(in: &subscriptions)
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.sessionDidBecomeActiveNotification)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.handleLockScreenSessionBecameActive() }
+            .sink { [weak self] _ in self?.handleLockScreenSessionBecameActive(source: "session-active") }
             .store(in: &subscriptions)
+
+        // Public sleep/wake fallback works in both distributions.
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.handleLockScreenSessionResigned(source: "sleep") }
+            .store(in: &subscriptions)
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.handleLockScreenSessionBecameActive(source: "wake") }
+            .store(in: &subscriptions)
+
+#if HALO_DIRECT
+        // macOS does not expose a documented NSWorkspace notification for a manual Lock Screen.
+        // Direct Halo can observe the long-established distributed screen lock notifications.
+        // Keep this out of HALO_APPSTORE builds.
+        let distributed = DistributedNotificationCenter.default()
+        lockScreenDistributedObservers.append(
+            distributed.addObserver(
+                forName: Notification.Name("com.apple.screenIsLocked"),
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.handleLockScreenSessionResigned(source: "screen-locked")
+                }
+            }
+        )
+        lockScreenDistributedObservers.append(
+            distributed.addObserver(
+                forName: Notification.Name("com.apple.screenIsUnlocked"),
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.handleLockScreenSessionBecameActive(source: "screen-unlocked")
+                }
+            }
+        )
+#endif
         NotificationCenter.default.publisher(for: .init("HaloPreviewLockScreenTransition"))
             .receive(on: RunLoop.main)
             .sink { [weak self] note in self?.previewLockScreenTransition(note) }
@@ -1410,8 +1472,9 @@ final class WindowManager {
         }
     }
 
-    private func handleLockScreenSessionResigned() {
+    private func handleLockScreenSessionResigned(source: String = "unknown") {
         guard !lockScreenSessionSuspended else { return }
+        NSLog("[Halo Lock] lock detected via %@", source)
         lockScreenSessionSuspended = true
         lockScreenUnlockWork?.cancel()
         lockScreenUnlockWork = nil
@@ -1435,8 +1498,9 @@ final class WindowManager {
         }
     }
 
-    private func handleLockScreenSessionBecameActive() {
+    private func handleLockScreenSessionBecameActive(source: String = "unknown") {
         guard lockScreenSessionSuspended else { return }
+        NSLog("[Halo Lock] unlock detected via %@", source)
         lockScreenSessionSuspended = false
         clearLockScreenPresence()
         lockScreenUnlockWork?.cancel()
@@ -1603,7 +1667,10 @@ final class WindowManager {
 
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
             let authorized = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
-            guard authorized else { return }
+            guard authorized else {
+                NSLog("[Halo Lock] summary skipped: notification authorization status = %ld", settings.authorizationStatus.rawValue)
+                return
+            }
             Task { @MainActor [weak self] in
                 self?.deliverLockScreenPresence(
                     preferences: preferences,
@@ -1651,11 +1718,18 @@ final class WindowManager {
         } else {
             trigger = nil
         }
-        center.add(UNNotificationRequest(
+        let request = UNNotificationRequest(
             identifier: Self.lockScreenPresenceNotificationID,
             content: content,
             trigger: trigger
-        ))
+        )
+        center.add(request) { error in
+            if let error {
+                NSLog("[Halo Lock] summary notification failed: %@", error.localizedDescription)
+            } else {
+                NSLog("[Halo Lock] summary notification accepted (%@)", card.kind)
+            }
+        }
     }
 
     private func clearLockScreenPresence() {
