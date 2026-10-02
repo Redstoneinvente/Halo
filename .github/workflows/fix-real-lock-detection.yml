@@ -1,0 +1,71 @@
+name: Repair real Lock Screen detection
+
+on:
+  push:
+    branches:
+      - fix-real-lock-detection
+    paths:
+      - '.github/workflows/fix-real-lock-detection.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-validate-push:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-real-lock-detection
+          fetch-depth: 0
+
+      - name: Apply lock detection patch
+        run: python3 scripts/fix_real_lock_detection.py
+
+      - name: Parse WindowManager
+        run: xcrun swiftc -parse Halo/NotchEngine/WindowManager.swift
+
+      - name: Typecheck lock and notification APIs
+        run: |
+          cat > /tmp/halo_lock_probe.swift <<'SWIFT'
+          import Foundation
+          import AppKit
+          import UserNotifications
+
+          final class ProbeDelegate: NSObject, UNUserNotificationCenterDelegate {
+              func userNotificationCenter(
+                  _ center: UNUserNotificationCenter,
+                  willPresent notification: UNNotification,
+                  withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+              ) {
+                  completionHandler([.banner, .list])
+              }
+          }
+
+          func probe() {
+              let center = DistributedNotificationCenter.default()
+              _ = center.addObserver(
+                  forName: Notification.Name("com.apple.screenIsLocked"),
+                  object: nil,
+                  suspensionBehavior: .deliverImmediately,
+                  queue: .main
+              ) { _ in }
+              _ = NSWorkspace.willSleepNotification
+              _ = NSWorkspace.didWakeNotification
+          }
+          SWIFT
+          xcrun swiftc -typecheck /tmp/halo_lock_probe.swift
+
+      - name: Validate and push repair
+        run: |
+          grep -q 'com.apple.screenIsLocked' Halo/NotchEngine/WindowManager.swift
+          grep -q 'com.apple.screenIsUnlocked' Halo/NotchEngine/WindowManager.swift
+          grep -q 'summary notification failed' Halo/NotchEngine/WindowManager.swift
+          grep -q '#if HALO_DIRECT' Halo/NotchEngine/WindowManager.swift
+          rm scripts/fix_real_lock_detection.py
+          rm .github/workflows/fix-real-lock-detection.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix real Lock Screen detection [skip ci]"
+          git push origin HEAD:fix-real-lock-detection
