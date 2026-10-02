@@ -3,8 +3,6 @@ from pathlib import Path
 path = Path('Halo/NotchEngine/WindowManager.swift')
 s = path.read_text()
 
-# 1) Add a notification delegate that explicitly presents Halo's after-unlock summary
-# even when Halo is the foreground app after unlocking.
 anchor = '''@MainActor
 final class WindowManager {
 '''
@@ -32,7 +30,6 @@ if s.count(anchor) != 1:
     raise SystemExit(f'WindowManager anchor count: {s.count(anchor)}')
 s = s.replace(anchor, delegate, 1)
 
-# 2) Retain Direct-build distributed notification observer tokens.
 state_anchor = '''    private var lockScreenPresenceRefreshWork: DispatchWorkItem?
 '''
 state_replacement = '''    private var lockScreenPresenceRefreshWork: DispatchWorkItem?
@@ -44,7 +41,6 @@ if s.count(state_anchor) != 1:
     raise SystemExit(f'lockScreenPresenceRefreshWork anchor count: {s.count(state_anchor)}')
 s = s.replace(state_anchor, state_replacement, 1)
 
-# 3) Install notification presentation delegate when WindowManager starts.
 start_anchor = '''    func start() {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
 '''
@@ -57,7 +53,6 @@ if s.count(start_anchor) != 1:
     raise SystemExit(f'start anchor count: {s.count(start_anchor)}')
 s = s.replace(start_anchor, start_replacement, 1)
 
-# 4) Replace the old session-only lock detection wiring with layered detection.
 old = '''        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.sessionDidResignActiveNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.handleLockScreenSessionResigned() }
@@ -96,7 +91,6 @@ new = '''        // Public session-switch notifications remain useful for Fast U
             distributed.addObserver(
                 forName: Notification.Name("com.apple.screenIsLocked"),
                 object: nil,
-                suspensionBehavior: .deliverImmediately,
                 queue: .main
             ) { [weak self] _ in
                 Task { @MainActor [weak self] in
@@ -108,7 +102,6 @@ new = '''        // Public session-switch notifications remain useful for Fast U
             distributed.addObserver(
                 forName: Notification.Name("com.apple.screenIsUnlocked"),
                 object: nil,
-                suspensionBehavior: .deliverImmediately,
                 queue: .main
             ) { [weak self] _ in
                 Task { @MainActor [weak self] in
@@ -122,19 +115,28 @@ if s.count(old) != 1:
     raise SystemExit(f'old lock subscriptions count: {s.count(old)}')
 s = s.replace(old, new, 1)
 
-# 5) Add source-aware diagnostics to lock/unlock handlers.
-s = s.replace(
-    '    private func handleLockScreenSessionResigned() {\n        guard !lockScreenSessionSuspended else { return }\n',
-    '    private func handleLockScreenSessionResigned(source: String = "unknown") {\n        guard !lockScreenSessionSuspended else { return }\n        NSLog("[Halo Lock] lock detected via %@", source)\n',
-    1,
-)
-s = s.replace(
-    '    private func handleLockScreenSessionBecameActive() {\n        guard lockScreenSessionSuspended else { return }\n',
-    '    private func handleLockScreenSessionBecameActive(source: String = "unknown") {\n        guard lockScreenSessionSuspended else { return }\n        NSLog("[Halo Lock] unlock detected via %@", source)\n',
-    1,
-)
+resigned_old = '''    private func handleLockScreenSessionResigned() {
+        guard !lockScreenSessionSuspended else { return }
+'''
+resigned_new = '''    private func handleLockScreenSessionResigned(source: String = "unknown") {
+        guard !lockScreenSessionSuspended else { return }
+        NSLog("[Halo Lock] lock detected via %@", source)
+'''
+if s.count(resigned_old) != 1:
+    raise SystemExit(f'resigned handler anchor count: {s.count(resigned_old)}')
+s = s.replace(resigned_old, resigned_new, 1)
 
-# 6) Report authorization state instead of silently returning.
+active_old = '''    private func handleLockScreenSessionBecameActive() {
+        guard lockScreenSessionSuspended else { return }
+'''
+active_new = '''    private func handleLockScreenSessionBecameActive(source: String = "unknown") {
+        guard lockScreenSessionSuspended else { return }
+        NSLog("[Halo Lock] unlock detected via %@", source)
+'''
+if s.count(active_old) != 1:
+    raise SystemExit(f'active handler anchor count: {s.count(active_old)}')
+s = s.replace(active_old, active_new, 1)
+
 auth_old = '''            let authorized = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
             guard authorized else { return }
 '''
@@ -148,7 +150,6 @@ if s.count(auth_old) != 1:
     raise SystemExit(f'authorization anchor count: {s.count(auth_old)}')
 s = s.replace(auth_old, auth_new, 1)
 
-# 7) Capture UNUserNotificationCenter.add errors and success.
 add_old = '''        center.add(UNNotificationRequest(
             identifier: Self.lockScreenPresenceNotificationID,
             content: content,
@@ -174,7 +175,6 @@ s = s.replace(add_old, add_new, 1)
 
 path.write_text(s)
 
-# Sanity assertions
 out = path.read_text()
 assert 'com.apple.screenIsLocked' in out
 assert 'com.apple.screenIsUnlocked' in out
