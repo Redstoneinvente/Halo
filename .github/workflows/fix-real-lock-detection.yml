@@ -47,7 +47,6 @@ jobs:
               _ = center.addObserver(
                   forName: Notification.Name("com.apple.screenIsLocked"),
                   object: nil,
-                  suspensionBehavior: .deliverImmediately,
                   queue: .main
               ) { _ in }
               _ = NSWorkspace.willSleepNotification
