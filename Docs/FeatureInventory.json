@@ -1,0 +1,347 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-10-10",
+  "baselineCommit": "969fd7a36c08ddada57164b63fa693375b45ec1e",
+  "verification": "Static source inspection only. Source presence does not prove a successful Mac build, working UI, production configuration or distribution compliance.",
+  "statusDefinitions": {
+    "source_present": "Code path or UI source exists; macOS behavior has not been tested here.",
+    "conditional": "Source exists but depends on permissions, configuration, distribution variant or supported services.",
+    "partial": "Related code exists but the complete proposed feature has not been established.",
+    "contract_only": "Interface or placeholder exists without a verified full provider.",
+    "not_found": "Not identified in this audit. This is not proof of complete absence."
+  },
+  "features": [
+    {
+      "id": "modes",
+      "name": "Simple and Advanced modes",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Core/WorkspaceModels.swift",
+          "contains": "enum HaloNotchMode:"
+        }
+      ]
+    },
+    {
+      "id": "editor",
+      "name": "Visual Workspace Editor",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Views/WidgetSettingsView.swift",
+          "contains": "VisualWorkspaceGridDropDelegate"
+        }
+      ]
+    },
+    {
+      "id": "profiles",
+      "name": "Workspace profiles and built-in presets",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Core/WorkspaceModels.swift",
+          "contains": "static var presets: [Profile]"
+        }
+      ]
+    },
+    {
+      "id": "rules",
+      "name": "App, battery, charging, display and hour automation rules",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Core/WorkspaceStore.swift",
+          "contains": "func evaluateRules()"
+        }
+      ]
+    },
+    {
+      "id": "schedules",
+      "name": "Profile and background schedules",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Core/WorkspaceStore.swift",
+          "contains": "func evaluateSchedules()"
+        }
+      ]
+    },
+    {
+      "id": "explanations",
+      "name": "Last automated profile activation explanation (this branch)",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Core/WorkspaceStore.swift",
+          "contains": "lastProfileAutomationEvent"
+        }
+      ]
+    },
+    {
+      "id": "media",
+      "name": "Music and Spotify media with Safari bridge",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Services/Integrations.swift",
+          "contains": "final class MediaService:"
+        }
+      ]
+    },
+    {
+      "id": "lyrics",
+      "name": "Lyrics fetching and synchronized display",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Views/SurfaceView.swift",
+          "contains": "private func loadLyrics() async"
+        }
+      ]
+    },
+    {
+      "id": "spectrum",
+      "name": "Audio spectrum sampling and display",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Views/ModuleViews.swift",
+          "contains": "OpenMediaSpectrumView"
+        }
+      ]
+    },
+    {
+      "id": "system",
+      "name": "CPU, memory, swap, network and thermal sampling",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Services/Integrations.swift",
+          "contains": "@Published var networkDownPerSecond"
+        }
+      ]
+    },
+    {
+      "id": "clipboard-text",
+      "name": "Basic clipboard widget: bounded in-memory text history",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Services/Integrations.swift",
+          "contains": "final class ClipboardService:"
+        }
+      ]
+    },
+    {
+      "id": "clipboard-ci",
+      "name": "Context Interface clipboard with image/file history",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Views/SurfaceView.swift",
+          "contains": "private struct ClipboardHistoryItem:"
+        }
+      ]
+    },
+    {
+      "id": "shelf",
+      "name": "File shelf, Quick Look and drag/drop",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Views/SurfaceView.swift",
+          "contains": "Quick Look"
+        }
+      ]
+    },
+    {
+      "id": "capture",
+      "name": "ScreenCaptureKit region capture with OCR",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Services/CaptureService.swift",
+          "contains": "import ScreenCaptureKit"
+        }
+      ]
+    },
+    {
+      "id": "ci",
+      "name": "Declarative Custom Interface SDK",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Core/CITriggerRuntime.swift",
+          "contains": "final class TriggerRouter"
+        }
+      ]
+    },
+    {
+      "id": "integrations",
+      "name": "App integration transport and broker",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Core/IntegrationTransport.swift",
+          "contains": "final class IntegrationTransport:"
+        }
+      ]
+    },
+    {
+      "id": "system-activities",
+      "name": "Opt-in accessibility-driven system Live Activities",
+      "status": "conditional",
+      "evidence": [
+        {
+          "path": "Halo/Core/WorkspaceStore.swift",
+          "contains": "final class SystemLiveActivitySource"
+        }
+      ]
+    },
+    {
+      "id": "hud",
+      "name": "HALO HUD engine",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Services/HUDEngine.swift",
+          "contains": "HaloHUDEvent"
+        }
+      ]
+    },
+    {
+      "id": "bluetooth",
+      "name": "Bluetooth context and events",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Core/WorkspaceStore.swift",
+          "contains": "BluetoothStateService.shared"
+        }
+      ]
+    },
+    {
+      "id": "pixel-pal",
+      "name": "Pixel Pal and environmental reactions",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Services/ShelfPreview.swift",
+          "contains": "final class EnvironmentalInterfaceEngine"
+        }
+      ]
+    },
+    {
+      "id": "app-bubbles",
+      "name": "App bubble interactions",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/NotchEngine/NotchBubbles.swift",
+          "contains": "NSWorkspace.shared"
+        }
+      ]
+    },
+    {
+      "id": "teleprompter",
+      "name": "Teleprompter and menu-bar features",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Services/CaptureService.swift",
+          "contains": "struct TeleprompterProfile"
+        }
+      ]
+    },
+    {
+      "id": "sparkle",
+      "name": "Sparkle updater in configured direct builds",
+      "status": "conditional",
+      "evidence": [
+        {
+          "path": "Halo/Services/SparkleUpdateController.swift",
+          "contains": "#if HALO_DIRECT"
+        }
+      ]
+    },
+    {
+      "id": "storekit",
+      "name": "StoreKit subscriptions",
+      "status": "conditional",
+      "evidence": [
+        {
+          "path": "Halo/Core/AppStoreLicensing.swift",
+          "contains": "subscription.status"
+        }
+      ]
+    },
+    {
+      "id": "weather",
+      "name": "Weather provider and weather widget",
+      "status": "contract_only",
+      "evidence": [
+        {
+          "path": "Halo/Core/ExtensionContracts.swift",
+          "contains": "protocol WeatherProvider"
+        }
+      ]
+    },
+    {
+      "id": "ai",
+      "name": "AI provider",
+      "status": "contract_only",
+      "evidence": [
+        {
+          "path": "Halo/Core/ExtensionContracts.swift",
+          "contains": "protocol AIActionProvider"
+        }
+      ]
+    },
+    {
+      "id": "activity-api",
+      "name": "External developer/agent Live Activity integration",
+      "status": "partial",
+      "evidence": [
+        {
+          "path": "Halo/Core/WorkspaceStore.swift",
+          "contains": "func upsertLiveActivity("
+        }
+      ]
+    },
+    {
+      "id": "meeting",
+      "name": "Meeting links but not complete call controls",
+      "status": "partial",
+      "evidence": [
+        {
+          "path": "Halo/Services/Integrations.swift",
+          "contains": "func meetingURL(for event:"
+        }
+      ]
+    },
+    {
+      "id": "shortcuts",
+      "name": "Native macOS App Intents shortcuts",
+      "status": "not_found",
+      "evidence": []
+    },
+    {
+      "id": "webcam",
+      "name": "Camera mirror",
+      "status": "not_found",
+      "evidence": []
+    },
+    {
+      "id": "gallery",
+      "name": "Community workspace gallery",
+      "status": "not_found",
+      "evidence": []
+    },
+    {
+      "id": "iphone",
+      "name": "iPhone companion",
+      "status": "not_found",
+      "evidence": []
+    }
+  ]
+}
