@@ -6890,6 +6890,17 @@ private struct AutomationSettingsPane: View {
         VStack(alignment: .leading, spacing: 16) {
             automationHeader
 
+            if selection == .profiles {
+                Label(
+                    workspace.lastProfileAutomationEvent ?? "No automatic profile activation has been recorded this session.",
+                    systemImage: "info.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel("Last profile automation: " + (workspace.lastProfileAutomationEvent ?? "None this session"))
+            }
+
             Picker("Automation category", selection: $selection) {
                 ForEach(HaloAutomationPaneSection.allCases) { section in
                     Label(section.rawValue, systemImage: section.symbol)
