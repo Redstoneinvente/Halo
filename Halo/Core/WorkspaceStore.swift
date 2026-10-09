@@ -61,6 +61,9 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         queueScheduleEvaluation()
     } }
     @Published private(set) var scheduledProfileID: UUID?
+    /// Ephemeral, human-readable reason for the most recent automatic profile activation.
+    /// Never persisted; manual profile selection clears it.
+    @Published private(set) var lastProfileAutomationEvent: String?
     var effectiveLayout: WorkspaceLayout {
         let saved = settings.profiles.first { $0.id == scheduledProfileID }?.layout ?? settings.layout
         return HaloFeatureAccess.shared.effectiveLayout(saved)
@@ -525,11 +528,20 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         }
         let winner = scheduleWinner(at: Date())
         let selected = winner?.1 == suppressedOccurrence ? nil : winner?.0
-        if scheduledProfileID != selected { scheduledProfileID = selected; updateArtworkPreference(); hudEngine?.configurationDidChange() }
+        if scheduledProfileID != selected {
+            scheduledProfileID = selected
+            if let selected,
+               let profile = settings.profiles.first(where: { $0.id == selected }) {
+                lastProfileAutomationEvent = "Schedule activated \(profile.name)."
+            }
+            updateArtworkPreference()
+            hudEngine?.configurationDidChange()
+        }
     }
     func resumeSchedules() { suppressedOccurrence = nil; evaluateSchedules() }
     func apply(_ profile: Profile) {
         guard HaloFeatureAccess.shared.allows(.profiles) else { return }
+        lastProfileAutomationEvent = nil
         suppressedOccurrence = scheduleWinner(at: Date())?.1
         scheduledProfileID = nil
         settings.layout = profile.layout; applyTheme?(profile.theme)
@@ -582,12 +594,22 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         }
         var current = Set<UUID>()
         var selected: Profile?
+        var selectedRule: AutomationRule?
         for rule in settings.rules where rule.matches(app: NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "", battery: system.battery, charging: system.charging, displays: NSScreen.screens.count, hour: Calendar.current.component(.hour, from: Date())) {
             current.insert(rule.id)
-            if !matchedRules.contains(rule.id), selected == nil { selected = settings.profiles.first { $0.id == rule.profileID } }
+            if !matchedRules.contains(rule.id), selected == nil,
+               let profile = settings.profiles.first(where: { $0.id == rule.profileID }) {
+                selected = profile
+                selectedRule = rule
+            }
         }
         matchedRules = current
-        if let selected { apply(selected) }
+        if let selected {
+            apply(selected)
+            if let selectedRule {
+                lastProfileAutomationEvent = "Automation activated \(selected.name): \(selectedRule.trigger.title) (\(selectedRule.value))."
+            }
+        }
     }
     private func bluetoothClosedNotchEventEnabled(_ kind: BluetoothConnectionEventKind) -> Bool {
         guard defaults.object(forKey: "HaloBluetoothClosedNotchEvents") as? Bool ?? true else { return false }
