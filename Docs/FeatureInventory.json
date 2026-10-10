@@ -46,12 +46,12 @@
     },
     {
       "id": "rules",
-      "name": "App, battery, charging, display and hour automation rules",
+      "name": "App, battery, charging, display, hour and media-playback automation rules",
       "status": "source_present",
       "evidence": [
         {
-          "path": "Halo/Core/WorkspaceStore.swift",
-          "contains": "func evaluateRules()"
+          "path": "Halo/Core/WorkspaceModels.swift",
+          "contains": "case mediaPlaying"
         }
       ]
     },
@@ -277,12 +277,12 @@
     },
     {
       "id": "weather",
-      "name": "Weather provider and weather widget",
-      "status": "contract_only",
+      "name": "Opt-in current-weather element via licensed commercial Open-Meteo API; requires Keychain API key",
+      "status": "conditional",
       "evidence": [
         {
-          "path": "Halo/Core/ExtensionContracts.swift",
-          "contains": "protocol WeatherProvider"
+          "path": "Halo/Views/ModuleViews.swift",
+          "contains": "class HaloWeatherService:"
         }
       ]
     },
@@ -299,43 +299,58 @@
     },
     {
       "id": "activity-api",
-      "name": "External developer/agent Live Activity integration",
+      "name": "Opt-in, file-fed developer Live Activities (no first-party agent adapters)",
       "status": "partial",
       "evidence": [
         {
           "path": "Halo/Core/WorkspaceStore.swift",
-          "contains": "func upsertLiveActivity("
+          "contains": "private func ingestDeveloperActivities()"
         }
       ]
     },
     {
       "id": "meeting",
-      "name": "Meeting links but not complete call controls",
+      "name": "Opt-in Calendar meeting countdown, HTTPS Join; no conferencing controls",
       "status": "partial",
       "evidence": [
         {
-          "path": "Halo/Services/Integrations.swift",
-          "contains": "func meetingURL(for event:"
+          "path": "Halo/Views/ModuleViews.swift",
+          "contains": "HaloMeetingCompanionEnabled"
         }
       ]
     },
     {
       "id": "shortcuts",
-      "name": "Native macOS App Intents shortcuts",
-      "status": "not_found",
-      "evidence": []
+      "name": "First-party App Intents: toggle, settings, apply profile",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/App/HaloApp.swift",
+          "contains": "struct HaloAppShortcuts:"
+        }
+      ]
     },
     {
       "id": "webcam",
-      "name": "Camera mirror",
-      "status": "not_found",
-      "evidence": []
+      "name": "Local, opt-in AVFoundation camera mirror in Capture widget",
+      "status": "source_present",
+      "evidence": [
+        {
+          "path": "Halo/Views/ModuleViews.swift",
+          "contains": "struct HaloCameraMirrorWidget:"
+        }
+      ]
     },
     {
       "id": "gallery",
-      "name": "Community workspace gallery",
-      "status": "not_found",
-      "evidence": []
+      "name": "Curated on-device gallery of 8 installable profile templates; not a hosted community market",
+      "status": "partial",
+      "evidence": [
+        {
+          "path": "Halo/Views/WorkspaceSettingsView.swift",
+          "contains": "Explore 8 workspace templates"
+        }
+      ]
     },
     {
       "id": "iphone",
@@ -343,5 +358,6 @@
       "status": "not_found",
       "evidence": []
     }
-  ]
+  ],
+  "expansion": "See Docs/FeatureExpansion2026-10.md for incremental feature implementations, limitations and release gate."
 }
