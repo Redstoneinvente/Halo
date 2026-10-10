@@ -2,12 +2,12 @@
 
 HALO is a customizable macOS notch utility with **Simple** and **Advanced** modes, a visual workspace editor, contextual interfaces, media and audio controls, profiles, automation, and optional integrations. Open `Halo.xcodeproj` to build the macOS app.
 
-> **Documentation status (2026-10-10):** This README supersedes a historical 0.2 implementation handoff that was no longer accurate about the current code. Features below are **found in source**, not independently certified to work in a signed release. See [Feature Reconciliation](Docs/FeatureReconciliation.md), [Feature Inventory](Docs/FeatureInventory.json), and [Implementation Status](Docs/ImplementationStatus.md). Published release/version behavior still requires testing on a supported Mac.
+> **Documentation status (2026-10-10):** This README supersedes a historical 0.2 implementation handoff that was no longer accurate about the current code. Features below are **found in source**, not independently certified to work in a signed release. See [Feature Expansion](Docs/FeatureExpansion2026-10.md), [Feature Reconciliation](Docs/FeatureReconciliation.md), [Feature Inventory](Docs/FeatureInventory.json), and [Implementation Status](Docs/ImplementationStatus.md). Published release/version behavior still requires testing on a supported Mac.
 
 ## What exists in the source
 
 - **Workspace:** Simple and Advanced notch modes; visual grid editor; custom widget placement, layouts, backgrounds, typography, open/closed geometry, transition tuning and display overrides.
-- **Profiles and automation:** Saved and built-in profiles, profile/background schedules, rules driven by foreground app, power, battery, display count and local hour. Automation settings on the reconciliation branch show the last auto-activation reason, only for the current session.
+- **Profiles and automation:** Saved and built-in profiles, profile/background schedules, rules driven by foreground app, power, battery, display count, local hour and media playback. Automation settings on the reconciliation branch show the last auto-activation reason, only for the current session.
 - **Widgets:** Clock, timer, shelf, media, audio, calendar, clipboard, system, launcher, activities, Pixel Pal, notes, capture and stopwatch. A developer module enum case exists but is not in the current `ModuleID.allCases` list, so it must not be advertised as an enabled standard module.
 - **Music:** Apple Music and Spotify playback integrations with supported controls; Safari bridge and system-audio fallback; artwork, audio visualizers, lyric retrieval and timed lyric UI. Support and data quality vary by player and permissions.
 - **Productivity:** Calendar and meeting links, file shelf with Quick Look, screenshot-region capture with ScreenCaptureKit and OCR using Vision, keyboard shortcuts, and selected partner actions.
@@ -18,7 +18,7 @@ HALO is a customizable macOS notch utility with **Simple** and **Advanced** mode
 
 ## Not yet established as complete
 
-Weather and AI provider contracts exist, but a complete live weather/AI product experience was not established in the static review. The developer-activity API, external agent monitoring, shared workspace marketplace, native App Intents shortcuts, webcam mirror and iPhone companion were also not established as shipped features in this source audit. See the [reconciliation](Docs/FeatureReconciliation.md) for what to verify before implementing anything twice.
+The expansion branch now includes opt-in commercial-key Weather, a Capture widget camera mirror, native App Intents, a local developer activity JSON bridge, a meeting countdown, and a curated eight-template gallery. These additions are source implementations **not yet Mac release-verified**. AI remains a provider contract; direct per-agent adapters, an online community template service, and an iPhone companion remain unfinished. See the [reconciliation](Docs/FeatureReconciliation.md) for what to verify before implementing anything twice.
 
 ## Build and validate
 
@@ -53,4 +53,4 @@ No secrets or private signing keys should be committed. Sparkle requires a valid
 4. Offer vetted, local workspace templates before a hosted community gallery.
 5. Consider small independent additions such as native App Intents, enhanced meeting UX and a real weather provider.
 
-See [Docs/FeatureReconciliation.md](Docs/FeatureReconciliation.md) for a ranked plan and acceptance matrix. Development work belongs on feature branches; do not merge to `main` before Mac validation.
+See [Docs/FeatureExpansion2026-10.md](Docs/FeatureExpansion2026-10.md) for setup, security and constraints, and [Docs/FeatureReconciliation.md](Docs/FeatureReconciliation.md) for the longer-term plan. Development work belongs on feature branches; do not merge to `main` before Mac validation.
