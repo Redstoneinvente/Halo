@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import AVKit
 import AVFoundation
+import Security
 import ImageIO
 import EventKit
 
@@ -2514,6 +2515,36 @@ final class HaloWeatherService: ObservableObject {
     private var activeTask: Task<Void, Never>?
     private var lastCoordinates = ""
 
+    /// Free Open-Meteo API use is non-commercial. HALO therefore requires a customer API key.
+    private static let credentialService = "com.redstoneinvente.halo.weather"
+    static func commercialAPIKey() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: credentialService,
+            kSecAttrAccount as String: "open-meteo",
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+    @discardableResult
+    static func saveCommercialAPIKey(_ value: String) -> Bool {
+        let match: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: credentialService,
+            kSecAttrAccount as String: "open-meteo"
+        ]
+        SecItemDelete(match as CFDictionary)
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return true }
+        var insert = match
+        insert[kSecValueData as String] = Data(normalized.utf8)
+        return SecItemAdd(insert as CFDictionary, nil) == errSecSuccess
+    }
+
     var isEnabled: Bool { UserDefaults.standard.bool(forKey: "HaloWeatherEnabled") }
     var summary: String {
         if let current { return "\(Int(current.temperature_2m.rounded()))°C · \(Self.condition(current.weather_code))" }
@@ -2531,13 +2562,17 @@ final class HaloWeatherService: ObservableObject {
         guard lat.isFinite && lon.isFinite && (-90...90).contains(lat) && (-180...180).contains(lon) else {
             error = "Invalid coordinates"; return
         }
+        guard let apiKey = Self.commercialAPIKey(), !apiKey.isEmpty else {
+            error = "Commercial weather API key required"; return
+        }
         let locationKey = "\(lat),\(lon)"
         guard !loading, (force || locationKey != lastCoordinates || Date().timeIntervalSince(lastFetch) > 900) else { return }
-        guard var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast") else { return }
+        guard var components = URLComponents(string: "https://customer-api.open-meteo.com/v1/forecast") else { return }
         components.queryItems = [
             URLQueryItem(name: "latitude", value: String(lat)),
             URLQueryItem(name: "longitude", value: String(lon)),
-            URLQueryItem(name: "current", value: "temperature_2m,weather_code")
+            URLQueryItem(name: "current", value: "temperature_2m,weather_code"),
+            URLQueryItem(name: "apikey", value: apiKey)
         ]
         guard let url = components.url else { return }
         loading = true
