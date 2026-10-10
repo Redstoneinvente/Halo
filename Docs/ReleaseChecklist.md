@@ -22,6 +22,7 @@ Do not distribute as production until these gates pass. The scripts are supplied
 - Enable/disable clipboard, excluded password apps, concealed markers, 50-item bound, clear on quit.
 - Calendar access: not determined, denied, granted, revoked; no events and multiple meetings.
 - Music/Spotify absent, stopped, playing, denied automation, timeout, track changes.
+- **Audio CI geometry:** Toggle “Use full notch area” on and off; verify controls, scrubber, lyrics, visualizer and bottom margin remain inside the surface at 24/40/64-pt compact strip heights, all four music layouts, varying foreground artwork sizes and extra margins. Include small-screen height constraints and retained closed-notch contents; the source regression test verifies the separate strip reservation, while actual clipping requires macOS UI QA.
 - Output device hotplug and devices that reject master-volume writes.
 - Screenshot permission denied/granted, cancel capture/save, OCR image failure, text-copy behavior.
 - Profile rules crossing both directions, competing conditions, deleted target profiles.
