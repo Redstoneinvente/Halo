@@ -1563,15 +1563,39 @@ struct CalendarModuleView: View {
     }
 
     var body: some View {
-        Group {
-            if let footprint {
-                switch footprint {
-                case .glance: glanceView
-                case .horizontal: horizontalCompactView
-                case .vertical: verticalCompactView
-                case .standard, .expanded: requestedCalendarView
+        VStack(spacing: 6) {
+            if UserDefaults.standard.bool(forKey: "HaloMeetingCompanionEnabled"),
+               let nextMeeting = service.upcomingEvents.first(where: {
+                   !$0.isAllDay && $0.endDate > Date() &&
+                   $0.startDate < Date().addingTimeInterval(20 * 60) &&
+                   service.meetingURL(for: $0) != nil
+               }),
+               let joinURL = service.meetingURL(for: nextMeeting),
+               availableHeight ?? 250 >= 150 {
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    HStack(spacing: 8) {
+                        Image(systemName: "video.badge.waveform")
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(nextMeeting.title ?? "Upcoming meeting").font(.caption.weight(.semibold)).lineLimit(1)
+                            let seconds = nextMeeting.startDate.timeIntervalSince(context.date)
+                            Text(seconds > 0 ? "Starts in \\(max(1, Int(ceil(seconds / 60)))) min" : "Meeting in progress")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        Link("Join", destination: joinURL).buttonStyle(.borderedProminent).controlSize(.small)
+                    }.padding(8).background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
                 }
-            } else { requestedCalendarView }
+            }
+            Group {
+                if let footprint {
+                    switch footprint {
+                    case .glance: glanceView
+                    case .horizontal: horizontalCompactView
+                    case .vertical: verticalCompactView
+                    case .standard, .expanded: requestedCalendarView
+                    }
+                } else { requestedCalendarView }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: options.alignment.alignment)
         .animation(.easeInOut(duration: 0.18), value: footprint)
