@@ -4,7 +4,7 @@
 
 This replaces a historical Halo 0.2 prototype checklist that was out of sync with the current repository. **Source present is not equivalent to built, tested, approved or shipped.** This audit did not run Xcode, exercise macOS UI flows, verify StoreKit renewals, notarize an app, or measure energy usage.
 
-See [FeatureReconciliation.md](FeatureReconciliation.md) for context, source links and a prioritized roadmap; [FeatureInventory.json](FeatureInventory.json) for evidence markers; `python3 Scripts/check_feature_inventory.py` for a no-dependency drift check.
+See [FeatureExpansion2026-10.md](FeatureExpansion2026-10.md) for this branch's new code paths, [FeatureReconciliation.md](FeatureReconciliation.md) for context, source links and a prioritized roadmap; [FeatureInventory.json](FeatureInventory.json) for evidence markers; `python3 Scripts/check_feature_inventory.py` for a no-dependency drift check.
 
 | Subsystem | Current source status | Remaining verification / important scope |
 | --- | --- | --- |
@@ -22,17 +22,17 @@ See [FeatureReconciliation.md](FeatureReconciliation.md) for context, source lin
 | Pixel Pal and other surfaces | Advanced Pixel Pal, environmental reactions, teleprompter/menu-bar paths in source | Native macOS/Reduce Motion QA, clipping, resource footprint |
 | Updates | Direct-build Sparkle controller is present but requires valid appcast/signing-key configuration; App Store variant excludes Sparkle | Production feed, signature, rollback, signed release and update install |
 | Purchases | StoreKit subscription, license and feature gate paths in source | Real purchase/renewal/restore, cancellation, entitlement migration, variant QA |
-| Weather | Provider contract and UI placeholders | Real provider, location consent, network and caching |
+| Weather | Commercial-key Open-Meteo provider with manual coordinates and Keychain-backed key was added in this branch; requires opt-in | Purchase/activate paid provider, confirm networking entitlement, test provider results and attribution |
 | AI | Provider contract | Actual provider, data disclosures, key management, privacy and consent |
-| Developer workspaces | Git-oriented/internal activity primitives | Secure external progress bridge for coding agents/Unity/Xcode, full error/notification UX |
-| Sharing/marketplace | Theme/layout export-import and CI package support | Safe curated gallery/marketplace; package review, assets and permission isolation |
-| Native Shortcuts/camera mirror/iPhone | Not established as complete by this source review | Confirm demand and cross-repository work before implementing |
+| Developer workspaces | Added bounded, opt-in file-fed Live Activity ingestion; existing internal primitives preserved | Native Xcode/Unity/Codex adapters, richer progress semantics and macOS sandbox-path QA |
+| Sharing/marketplace | Added installable local eight-template gallery and existing theme/layout export-import | Online community upload, signed packages, moderation, assets and permission isolation |
+| Native Shortcuts/camera mirror/iPhone | Added first-party App Intents and opt-in camera mirror; no iPhone app in this repository | Build and runtime tests for Shortcuts and AVFoundation; iPhone sync app remains future |
 
 ## Verification completed in this branch
 
 - Reviewed active Swift services, models, Xcode build variants, CI SDK, app integrations, workspace settings and media presentation code.
 - Reconciled previous documents against source-backed evidence instead of treating the 0.2 README as authoritative.
-- Implemented a **session-only explanation for the most recent automatic profile activation** in Automation settings.
+- Implemented a **session-only explanation for the most recent automatic profile activation** in Automation settings, an additional playback automation trigger and the seven scoped feature expansions in [FeatureExpansion2026-10.md](FeatureExpansion2026-10.md).
 - Added a machine-readable inventory and source-evidence drift checker.
 
 ## Verification still required
