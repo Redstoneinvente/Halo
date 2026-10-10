@@ -4,6 +4,8 @@ Audit date: **2026-10-10**. Baseline: `main` commit `969fd7a36c08ddada57164b63fa
 
 > **Important:** This is a static audit of the repository, **not** a Mac build, a release certification, or proof that every feature works on users' machines. The [machine-readable inventory](FeatureInventory.json) links claims to code evidence. Run `python3 Scripts/check_feature_inventory.py` after source changes. The checker validates evidence markers, not functional behavior.
 
+> **Feature branch update:** Seven incremental implementations have since been added. See [FeatureExpansion2026-10.md](FeatureExpansion2026-10.md) before interpreting the 2026-10-10 baseline findings below as the current branch state. In particular, weather, camera mirror and native App Intents now have source implementations (pending Mac validation); the local template gallery is not yet a hosted community market.
+
 ## Main reconciliation findings
 
 The older `README.md` and `ImplementationStatus.md` described a significantly earlier Halo 0.2 prototype. They said that some features were missing even though newer code paths now exist. They also described the app as never compiled or signed, which **cannot be inferred about the current product** from the old document. This audit does not independently certify signing, build success or App Store acceptance.
