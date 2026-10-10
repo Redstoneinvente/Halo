@@ -22,6 +22,7 @@ Do not distribute as production until these gates pass. The scripts are supplied
 - Enable/disable clipboard, excluded password apps, concealed markers, 50-item bound, clear on quit.
 - Calendar access: not determined, denied, granted, revoked; no events and multiple meetings.
 - Music/Spotify absent, stopped, playing, denied automation, timeout, track changes.
+- **Audio CI geometry:** Toggle “Use full notch area” on and off; verify controls, scrubber, lyrics, visualizer and bottom margin remain inside the surface at 24/40/64-pt compact strip heights, all four music layouts, varying foreground artwork sizes and extra margins. Include small-screen height constraints and retained closed-notch contents; the source regression test verifies the separate strip reservation, while actual clipping requires macOS UI QA.
 - Output device hotplug and devices that reject master-volume writes.
 - Screenshot permission denied/granted, cancel capture/save, OCR image failure, text-copy behavior.
 - Profile rules crossing both directions, competing conditions, deleted target profiles.
@@ -36,7 +37,7 @@ Do not distribute as production until these gates pass. The scripts are supplied
 - Check every observer/task/player is released on quit/rebuild.
 - Review Apple-event entitlement and privacy strings.
 - Review UserDefaults retention, clipboard exclusions and sensitive-text exposure.
-- Implement outstanding feature gates and threat-model executable plugins before enabling them.
+- Validate existing feature gates across Direct and App Store schemes; threat-model any future executable plugins before considering them (current third-party CI SDK is declarative).
 - Add a production app icon and privacy policy; no icon is claimed in this package.
 
 ## Archive and notarize
@@ -50,7 +51,7 @@ bash Scripts/export-notarize.sh YOUR_NOTARYTOOL_KEYCHAIN_PROFILE
 
 The second script contacts Apple and requires your locally configured credentials. It does not install an updater or publish a release. Verify the stapled app on a clean Mac using Gatekeeper, then package it for distribution.
 
-An updater, release feed, signing-key handling, rollback policy and licensing UX remain separate engineering work. No credentials or production license keys are bundled.
+A Direct-build Sparkle update controller exists, but a valid HTTPS appcast, public signing key, production release feed, rollback/install testing and signing/notarization are required. The App Store scheme must exclude Sparkle. Licensing and subscription paths exist in source but still need real purchase, renewal and restoration QA. No private signing keys should be bundled.
 
 ## Apple API references
 

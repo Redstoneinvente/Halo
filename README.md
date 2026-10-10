@@ -1,85 +1,56 @@
-# Halo 0.2 — native macOS workspace
+# HALO | Native macOS notch workspace
 
-Open **Halo.xcodeproj**, select **Halo → My Mac**, choose your signing Team, and press **Command–R**. Requires macOS 13+ and Xcode 15+. There are no third-party app dependencies or required accounts.
+HALO is a customizable macOS notch utility with **Simple** and **Advanced** modes, a visual workspace editor, contextual interfaces, media and audio controls, profiles, automation, and optional integrations. Open `Halo.xcodeproj` to build the macOS app.
 
-This is a substantial implementation expansion, **not completion of every feature in the original product brief**. Source has passed structural and Swift grammar checks in Linux. It has **not been compiled, tested with the Apple SDK, or run on macOS**. Review Docs/ImplementationStatus.md before treating it as a release.
+> **Documentation status (2026-10-10):** This README supersedes a historical 0.2 implementation handoff that was no longer accurate about the current code. Features below are **found in source**, not independently certified to work in a signed release. See [Feature Expansion](Docs/FeatureExpansion2026-10.md), [Feature Reconciliation](Docs/FeatureReconciliation.md), [Feature Inventory](Docs/FeatureInventory.json), and [Implementation Status](Docs/ImplementationStatus.md). Published release/version behavior still requires testing on a supported Mac.
 
-## Included
+## What exists in the source
 
-Latest update: closed-width handling fixed, eight contours, independent opening/closing transitions, closed-height controls, module drag ordering, profile renaming, shelf pins and Quick Look. See Docs/NotchCustomization.md for controls and regression coverage.
+- **Workspace:** Simple and Advanced notch modes; visual grid editor; custom widget placement, layouts, backgrounds, typography, open/closed geometry, transition tuning and display overrides.
+- **Profiles and automation:** Saved and built-in profiles, profile/background schedules, rules driven by foreground app, power, battery, display count, local hour and media playback. Automation settings on the reconciliation branch show the last auto-activation reason, only for the current session.
+- **Widgets:** Clock, timer, shelf, media, audio, calendar, clipboard, system, launcher, activities, Pixel Pal, notes, capture and stopwatch. A developer module enum case exists but is not in the current `ModuleID.allCases` list, so it must not be advertised as an enabled standard module.
+- **Music:** Apple Music and Spotify playback integrations with supported controls; Safari bridge and system-audio fallback; artwork, audio visualizers, lyric retrieval and timed lyric UI. Support and data quality vary by player and permissions.
+- **Productivity:** Calendar and meeting links, file shelf with Quick Look, screenshot-region capture with ScreenCaptureKit and OCR using Vision, keyboard shortcuts, and selected partner actions.
+- **Clipboard:** The regular clipboard module stores bounded **text-only, in-memory** history. A **separate Clipboard Context Interface** supports contextual actions and image/file-aware, bounded in-memory history. These are not yet a unified cross-device clipboard manager.
+- **System and context:** Battery, CPU, memory, swap, disk, network and thermal readings; audio output selection; Bluetooth context; contextual HUD events; app bubbles; Pixel Pal/environmental reactions; teleprompter features.
+- **Live activities and extensions:** Internal Live Activity model, opt-in accessibility-derived system events, declarative Custom Interface SDK and registered app integration/broker paths. Executable third-party code is not loaded inside HALO.
+- **Distribution:** Distinct Direct and App Store build configurations, StoreKit entitlement/subscription handling, and a Sparkle update controller for **configured Direct builds only**. The existence of these paths does not establish production configuration, purchases, App Store acceptance, or release testing.
 
-- Fourteen dashboard modules: clock, focus timer, shelf, media, audio, calendar, clipboard, system, launcher, live activities, Git status, notes, capture/OCR, stopwatch.
-- Ten surface placement choices; per-display theme and optional profile-layout snapshots.
-- Module enable/disable and ordering; eight preset profiles and custom profile snapshots.
-- App/battery/charging/display-count/hour rules that switch profiles.
-- Image, muted looping video, gradient, solid and glass backgrounds; blur, saturation and brightness.
-- Theme v1 import and v2 layout/theme import/export. Imported themes cannot access foreign local asset paths.
-- Automatic Apple Music/Spotify detection and scripting controls, CoreAudio output selection/volume where supported, EventKit schedule.
-- Opt-in memory-only text clipboard history, exclusions, search, copy and clear.
-- Screenshot-region capture using macOS's capture tool; on-device Vision OCR.
-- File references, drag in/out, open/reveal/share, retention and optional persistence.
-- Declarative plugin commands with validation and per-invocation URL confirmation.
-- Configurable global shortcut, launch at login, permission explanations.
-- Xcode logic-test target, Swift package tests, release scripts and checklists.
-- Weather/AI extension protocols and offline license signature verification, not connected services or enforced licensing.
+## Not yet established as complete
 
-## Custom CI authoring
+The expansion branch now includes opt-in commercial-key Weather, a Capture widget camera mirror, native App Intents, a local developer activity JSON bridge, a meeting countdown, and a curated eight-template gallery. These additions are source implementations **not yet Mac release-verified**. AI remains a provider contract; direct per-agent adapters, an online community template service, and an iPhone companion remain unfinished. See the [reconciliation](Docs/FeatureReconciliation.md) for what to verify before implementing anything twice.
 
-Halo supports declarative third-party `.haloCI` packages through **CI SDK 0.1**. Custom CIs can provide their own closed/expanded notch layouts, static or bounded dynamic sizing, independent backgrounds, reactive Halo/macOS bindings, automatic triggers, local state, permissions and brokered actions. Surface ownership remains centrally arbitrated by Halo, so lower-priority CIs do not take over while a higher-priority CI owns the notch.
+## Build and validate
 
-Start with **[Docs/CustomCI_Authoring.md](Docs/CustomCI_Authoring.md)**. It contains a complete starter package plus the current component, binding/context, trigger, action, permission, capability, sizing and background reference. A working package is also available at `Examples/HelloWorld.haloCI`.
-
-For SDK/runtime implementation work, `Docs/CISDK.md` remains the canonical architecture specification.
-
-## Run and test on a Mac
+Requirements in the checked-in project include a **macOS 13.0 deployment target** and a Swift 5 build configuration. Xcode with the necessary Apple SDK and signing configuration is required to validate real behavior.
 
 ```sh
-bash Scripts/validate.sh
-```
-
-This builds the app and runs Xcode logic tests, then runs the Swift package tests. For local unsigned compilation only:
-
-```sh
+# Xcode scheme: Halo (alternatively inspect Halo Direct / Halo App Store)
 xcodebuild -project Halo.xcodeproj -scheme Halo -configuration Debug CODE_SIGNING_ALLOWED=NO build
+
+# Existing project checks: build, tests and supporting validation on macOS
+bash Scripts/validate.sh
+
+# Source-evidence drift check (works with Python 3.9+ on any OS)
+python3 Scripts/check_feature_inventory.py
 ```
 
-Use a properly signed build to evaluate privacy prompts and distribution behavior. **Command–U** runs the logic tests in Xcode. Tests exercise model/manifest/license logic, not AppKit integration.
+The Python inventory checker **does not compile Swift** or verify runtime behavior. Run Xcode unit tests and the full [Release Checklist](Docs/ReleaseChecklist.md) on a supported Mac, including both distribution configurations.
 
-Portable structure check:
+## Privacy, security and distribution
 
-```sh
-python3 Scripts/check_structure.py
-```
+HALO requests optional macOS access for specific functionality (for example calendar, screen capture, system activities, audio and clipboard workflows). Check the current implementation, settings and disclosures for each permission. Do not assume that source-only safeguards replace operating-system tests.
 
-The optional tree-sitter Swift parser only checks grammar. It is not an SDK type checker and is not an app dependency.
+Third-party Custom Interfaces are **declarative**. The existing SDK is designed around centralized surface ownership and brokered capabilities. Do not import executable packages or extend permissions without following [AGENTS.md](AGENTS.md), [CISDK.md](Docs/CISDK.md), [Custom CI Authoring](Docs/CustomCI_Authoring.md), and [App Integration CI Architecture](Docs/AppIntegrationCIArchitecture.md).
 
-## First launch
+No secrets or private signing keys should be committed. Sparkle requires a valid HTTPS appcast and public signing key configured for a Direct build. The App Store path must exclude Sparkle components as designed.
 
-Settings opens on first launch. Enable modules under Modules and optional data access under Privacy. Default global shortcut: **Option–Command–Space**. Hover or click the top strip to expand. Right-click the surface for profiles. Pin to keep it open. Use the menu-bar icon for Settings or Quit.
+## Next priorities
 
-Halo automatically detects playing Apple Music/Spotify instances using playback notifications plus a two-second fallback check. macOS Automation permission may be requested once per player. A denied player is skipped until Retry detection; browsers and other players are not supported. Audio devices without writable master volume show an explanation.
+1. Stabilize and benchmark closed/open notch geometry, media seeking, display changes, Pixel Pal, capture permissions and sleep/wake.
+2. Extend **context transparency** and user override controls rather than creating a second automation engine.
+3. Build developer activities using the current Live Activity and CI contracts.
+4. Offer vetted, local workspace templates before a hosted community gallery.
+5. Consider small independent additions such as native App Intents, enhanced meeting UX and a real weather provider.
 
-Choose a display override in Displays; applying a profile there snapshots that display's modules/background separately. Global profile changes do not replace independent display snapshots. Detached panels retain their position through appearance edits; positions are not persisted across launches.
-
-## Privacy and storage
-
-This is a non-sandboxed direct-distribution target with hardened runtime enabled. Preferences, notes, profile settings, manifests, and optionally shelf paths are in UserDefaults. Clipboard history stays in RAM and clears on quit; it captures text only and is off by default. Clipboard exclusions are best-effort, not a guarantee against secrets.
-
-Backgrounds and shelf items reference original files; moving them can break references. Shelf removal never deletes originals. Screenshots are saved only to a user-selected destination. OCR is on-device. No analytics, weather requests, or AI uploads are configured. Optional music artwork colors download Spotify cover images and read Apple Music artwork from the player.
-
-Imported theme assets must be reselected locally. Plugin URLs are shown for confirmation before opening; Shortcuts may themselves perform actions configured by the user.
-
-## Release
-
-See Docs/ReleaseChecklist.md. Signing, notarization, production icon, update service, performance/accessibility QA, and outstanding brief features are not complete. No licensing gate is enabled; the signed-license verifier is isolated from the free core.
-
-See Docs/Architecture.md and Docs/Plugins.md for extension contracts.
-
-### Personalization update
-
-- **Schedules:** weekday/time ranges for profiles and backgrounds, including overnight ranges and restoration of the normal layout/background.
-- **Appearance:** static soft grain, grain size and warmth; glass stays native.
-- **Closed notch:** independent left/right icons or GIFs, shown always, never or during music; widening for pinned files, capture/OCR and recent file additions as well as playback/timers/activities.
-- **Rendering:** dashboard layout stays at its final width during transitions; lazy widget creation, unchanged-state suppression and background disk/power sampling reduce main-thread work.
-
-See [Personalization.md](Docs/Personalization.md) for behavior and the Mac validation checklist. The pending nine visualizer styles and optional artwork colors are included in this update. Source and Swift grammar checks pass in the editing environment; macOS build/runtime performance remain unverified.
+See [Docs/FeatureExpansion2026-10.md](Docs/FeatureExpansion2026-10.md) for setup, security and constraints, and [Docs/FeatureReconciliation.md](Docs/FeatureReconciliation.md) for the longer-term plan. Development work belongs on feature branches; do not merge to `main` before Mac validation.

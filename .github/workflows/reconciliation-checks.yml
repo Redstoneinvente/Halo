@@ -1,0 +1,52 @@
+name: HALO Reconciliation Checks
+
+on:
+  pull_request:
+    paths:
+      - 'README.md'
+      - 'Docs/**'
+      - 'Scripts/check_feature_inventory.py'
+      - 'Halo/**'
+      - '.github/workflows/reconciliation-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: halo-reconciliation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evidence-drift:
+    name: Feature evidence check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Python syntax
+        run: python3 -m py_compile Scripts/check_feature_inventory.py
+      - name: Validate source-linked inventory
+        run: python3 Scripts/check_feature_inventory.py
+
+  mac-build:
+    name: Manual macOS unsigned build (${{ matrix.scheme }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        scheme: ['Halo Direct', 'Halo App Store']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode details
+        run: xcodebuild -version
+      - name: Resolve dependencies
+        run: xcodebuild -resolvePackageDependencies -project Halo.xcodeproj -scheme "${{ matrix.scheme }}"
+      - name: Compile app without signing
+        run: >
+          xcodebuild -project Halo.xcodeproj
+          -scheme "${{ matrix.scheme }}"
+          -configuration Debug
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO
+          build

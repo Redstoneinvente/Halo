@@ -8143,6 +8143,31 @@ private struct AudioCIScrubber: View {
     }
 }
 
+/// Audio CI owns only the body below the compact notch when full-area mode is off.
+/// Its window request must include the same strip reserved by SurfaceView's VStack;
+/// otherwise WindowManager correctly sizes the body but the surface clips its final rows.
+enum AudioCIExpandedSurfaceSizing {
+    static func compactStripReservation(usesFullNotchArea: Bool, compactHeight: Double) -> Double {
+        usesFullNotchArea ? 0 : max(40, compactHeight)
+    }
+
+    static func requestedHeight(
+        contentHeight: Double,
+        topInset: Double,
+        bottomMargin: Double,
+        usesFullNotchArea: Bool,
+        compactHeight: Double
+    ) -> Double {
+        let strip = compactStripReservation(
+            usesFullNotchArea: usesFullNotchArea,
+            compactHeight: compactHeight
+        )
+        // WindowManager applies the real display-height ceiling. An unrelated hard
+        // 700-pt cap here could clip a tall music layout before it reaches that ceiling.
+        return max(150, contentHeight + topInset + bottomMargin + strip)
+    }
+}
+
 private struct ContextMusicView: View {
     @ObservedObject var media: MediaService
     let options: ContextMusicOptions
@@ -8415,8 +8440,17 @@ private struct ContextMusicView: View {
             ))
             : 0
         let requestedWidth = max(audioRequestedWidth, retainedClosedWidth)
-        let requestedHeight = innerHeight + contentTopInset + options.resolvedBottomMargin
-        return CGSize(width: requestedWidth, height: min(700, max(150, requestedHeight)))
+        // In non-full-area mode SurfaceView renders a separate compact notch strip
+        // *above* this view. Reserve that height in addition to the Audio CI body.
+        // Full-area mode continues to use only its content height.
+        let requestedHeight = AudioCIExpandedSurfaceSizing.requestedHeight(
+            contentHeight: innerHeight,
+            topInset: contentTopInset,
+            bottomMargin: options.resolvedBottomMargin,
+            usesFullNotchArea: usesFullNotchArea,
+            compactHeight: Double(surfaceState.compactHeight)
+        )
+        return CGSize(width: requestedWidth, height: requestedHeight)
     }
 
     @ViewBuilder private func contextBackground(size: CGSize) -> some View {

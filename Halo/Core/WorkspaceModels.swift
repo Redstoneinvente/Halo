@@ -1703,6 +1703,7 @@ struct Profile: Codable, Identifiable {
 }
 enum RuleTrigger: String, Codable, CaseIterable, Hashable {
     case activeApp
+    case mediaPlaying
     case batteryBelow
     case charging
     case displayCount
@@ -1711,6 +1712,7 @@ enum RuleTrigger: String, Codable, CaseIterable, Hashable {
     var title: String {
         switch self {
         case .activeApp: return "Application is active"
+        case .mediaPlaying: return "Music playback is"
         case .batteryBelow: return "Battery is below"
         case .charging: return "Power state is"
         case .displayCount: return "Display count is"
@@ -1721,6 +1723,7 @@ enum RuleTrigger: String, Codable, CaseIterable, Hashable {
     var defaultValue: String {
         switch self {
         case .activeApp: return "com.apple.dt.Xcode"
+        case .mediaPlaying: return "true"
         case .batteryBelow: return "20"
         case .charging: return "true"
         case .displayCount: return "1"
@@ -1736,10 +1739,11 @@ struct AutomationRule: Codable, Identifiable {
     var value = "com.apple.dt.Xcode"
     var profileID: UUID
 
-    func matches(app: String, battery: Int?, charging: Bool, displays: Int, hour: Int) -> Bool {
+    func matches(app: String, battery: Int?, charging: Bool, displays: Int, hour: Int, mediaPlaying: Bool = false) -> Bool {
         guard enabled else { return false }
         switch trigger {
         case .activeApp: return app == value
+        case .mediaPlaying: return mediaPlaying == (value == "true")
         case .batteryBelow: return battery.map { $0 < (Int(value) ?? 0) } ?? false
         case .charging: return charging == (value == "true")
         case .displayCount: return displays == Int(value)

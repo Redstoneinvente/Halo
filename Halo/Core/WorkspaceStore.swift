@@ -61,6 +61,9 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         queueScheduleEvaluation()
     } }
     @Published private(set) var scheduledProfileID: UUID?
+    /// Ephemeral, human-readable reason for the most recent automatic profile activation.
+    /// Never persisted; manual profile selection clears it.
+    @Published private(set) var lastProfileAutomationEvent: String?
     var effectiveLayout: WorkspaceLayout {
         let saved = settings.profiles.first { $0.id == scheduledProfileID }?.layout ?? settings.layout
         return HaloFeatureAccess.shared.effectiveLayout(saved)
@@ -318,6 +321,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             self.tick += 1
             self.pollMedia()
             self.pruneLiveActivities()
+            if self.tick % 2 == 0 { self.ingestDeveloperActivities() }
             let minute = Int(Date().timeIntervalSince1970 / 60)
             if self.lastScheduleMinute != minute { self.lastScheduleMinute = minute; self.evaluateSchedules() }
             self.clipboard.poll(
@@ -525,11 +529,20 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         }
         let winner = scheduleWinner(at: Date())
         let selected = winner?.1 == suppressedOccurrence ? nil : winner?.0
-        if scheduledProfileID != selected { scheduledProfileID = selected; updateArtworkPreference(); hudEngine?.configurationDidChange() }
+        if scheduledProfileID != selected {
+            scheduledProfileID = selected
+            if let selected,
+               let profile = settings.profiles.first(where: { $0.id == selected }) {
+                lastProfileAutomationEvent = "Schedule activated \(profile.name)."
+            }
+            updateArtworkPreference()
+            hudEngine?.configurationDidChange()
+        }
     }
     func resumeSchedules() { suppressedOccurrence = nil; evaluateSchedules() }
     func apply(_ profile: Profile) {
         guard HaloFeatureAccess.shared.allows(.profiles) else { return }
+        lastProfileAutomationEvent = nil
         suppressedOccurrence = scheduleWinner(at: Date())?.1
         scheduledProfileID = nil
         settings.layout = profile.layout; applyTheme?(profile.theme)
@@ -582,12 +595,22 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         }
         var current = Set<UUID>()
         var selected: Profile?
-        for rule in settings.rules where rule.matches(app: NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "", battery: system.battery, charging: system.charging, displays: NSScreen.screens.count, hour: Calendar.current.component(.hour, from: Date())) {
+        var selectedRule: AutomationRule?
+        for rule in settings.rules where rule.matches(app: NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "", battery: system.battery, charging: system.charging, displays: NSScreen.screens.count, hour: Calendar.current.component(.hour, from: Date()), mediaPlaying: media.isPlaying) {
             current.insert(rule.id)
-            if !matchedRules.contains(rule.id), selected == nil { selected = settings.profiles.first { $0.id == rule.profileID } }
+            if !matchedRules.contains(rule.id), selected == nil,
+               let profile = settings.profiles.first(where: { $0.id == rule.profileID }) {
+                selected = profile
+                selectedRule = rule
+            }
         }
         matchedRules = current
-        if let selected { apply(selected) }
+        if let selected {
+            apply(selected)
+            if let selectedRule {
+                lastProfileAutomationEvent = "Automation activated \(selected.name): \(selectedRule.trigger.title) (\(selectedRule.value))."
+            }
+        }
     }
     private func bluetoothClosedNotchEventEnabled(_ kind: BluetoothConnectionEventKind) -> Bool {
         guard defaults.object(forKey: "HaloBluetoothClosedNotchEvents") as? Bool ?? true else { return false }
@@ -621,6 +644,73 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
             persistent: false
         )
         upsertLiveActivity(activity)
+    }
+
+
+    /// Local-only, opt-in developer activity bridge. An external tool writes a bounded JSON
+    /// snapshot into Halo's own Application Support directory, never an executable plugin.
+    static var developerActivityFileURL: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first?.appendingPathComponent("HALO", isDirectory: true)
+            .appendingPathComponent("DeveloperActivities.json")
+    }
+
+    private struct DeveloperActivityEnvelope: Decodable {
+        var events: [DeveloperActivityRecord]
+    }
+    private struct DeveloperActivityRecord: Decodable {
+        var id: String
+        var title: String
+        var detail: String?
+        var state: String?
+        var progress: Double?
+    }
+
+    private func ingestDeveloperActivities() {
+        guard HaloFeatureAccess.shared.allows(.liveActivitiesWidget),
+              defaults.bool(forKey: "HaloDeveloperActivitiesEnabled"),
+              let url = Self.developerActivityFileURL,
+              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let bytes = attributes[.size] as? NSNumber,
+              bytes.intValue > 0, bytes.intValue <= 65_536,
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let changed = attributes[.modificationDate] as? Date,
+              abs(changed.timeIntervalSinceNow) <= 90,
+              let data = try? Data(contentsOf: url),
+              data.count <= 65_536,
+              let payload = try? JSONDecoder().decode(DeveloperActivityEnvelope.self, from: data) else { return }
+        var seen = Set<String>()
+        for event in payload.events.prefix(12) {
+            let identifier = event.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard (1...80).contains(identifier.count),
+                  identifier.unicodeScalars.allSatisfy({
+                      CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" || $0 == "."
+                  }),
+                  !title.isEmpty, title.count <= 120,
+                  seen.insert(identifier).inserted else { continue }
+            let externalID = "halo.developer." + identifier
+            if event.state == "ended" || event.state == "failed" {
+                endLiveActivity(externalID: externalID, detail: event.detail, linger: 6)
+                continue
+            }
+            guard event.state == nil || event.state == "running" || event.state == "waiting" else { continue }
+            let fraction = event.progress.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil }
+            upsertLiveActivity(LiveActivity(
+                externalID: externalID,
+                sourceName: "Developer",
+                kind: fraction == nil ? .generic : .progress,
+                state: .active,
+                symbolName: "hammer",
+                title: title,
+                detail: String((event.detail ?? "").prefix(240)),
+                progress: fraction,
+                updatedAt: Date(),
+                expiresAt: Date().addingTimeInterval(15),
+                priority: 55,
+                persistent: false
+            ))
+        }
     }
 
     func publish(_ title: String, detail: String = "", progress: Double? = nil) {
