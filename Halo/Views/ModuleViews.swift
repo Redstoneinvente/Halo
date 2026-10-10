@@ -1537,6 +1537,7 @@ struct VisualWorkspaceCalendarView: View {
 }
 
 struct CalendarModuleView: View {
+    @AppStorage("HaloMeetingCompanionEnabled") private var meetingCompanionEnabled = false
     @Environment(\.widgetStyle) private var style
     @Environment(\.openNotchPresentation) private var presentation
     @Environment(\.openNotchAvailableWidth) private var availableWidth
@@ -1565,7 +1566,7 @@ struct CalendarModuleView: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            if UserDefaults.standard.bool(forKey: "HaloMeetingCompanionEnabled"),
+            if meetingCompanionEnabled,
                let nextMeeting = service.upcomingEvents.first(where: {
                    !$0.isAllDay && $0.endDate > Date() &&
                    $0.startDate < Date().addingTimeInterval(20 * 60) &&
@@ -1965,6 +1966,7 @@ struct ClipboardModuleView: View {
     }
 }
 
+@MainActor
 struct SystemModuleView: View {
     @Environment(\.widgetStyle) private var style
     @Environment(\.openNotchPresentation) private var presentation
@@ -2690,6 +2692,7 @@ private struct HaloMirrorPreview: NSViewRepresentable {
     func updateNSView(_ nsView: HaloMirrorHostView, context: Context) {}
 }
 
+@MainActor
 struct HaloCameraMirrorWidget: View {
     @ObservedObject private var mirror = HaloCameraMirrorService.shared
     var body: some View {
