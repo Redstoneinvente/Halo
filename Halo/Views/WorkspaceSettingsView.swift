@@ -7243,6 +7243,7 @@ private struct AutomationProfileRuleEditor: View {
     private var triggerSymbol: String {
         switch rule.trigger {
         case .activeApp: return "app.fill"
+        case .mediaPlaying: return "music.note"
         case .batteryBelow: return "battery.25"
         case .charging: return "bolt.fill"
         case .displayCount: return "display.2"
@@ -7254,6 +7255,8 @@ private struct AutomationProfileRuleEditor: View {
         switch rule.trigger {
         case .activeApp:
             return "When \(HaloAutomationAppPresentation.name(for: rule.value)) is active"
+        case .mediaPlaying:
+            return rule.value == "true" ? "When media starts playing" : "When playback pauses or stops"
         case .batteryBelow:
             return "When battery drops below \(min(100, max(1, Int(rule.value) ?? 20)))%"
         case .charging:
