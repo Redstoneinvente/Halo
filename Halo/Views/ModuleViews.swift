@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVKit
+import AVFoundation
 import ImageIO
 import EventKit
 
@@ -342,6 +343,9 @@ struct CaptureModuleView: View {
                                 Button("Extract text from image…") { service.chooseImage() }
                             }.disabled(service.busy)
                         }
+                    }
+                    WidgetElement(key: "mirror", defaultVisible: false, defaultPriority: .optional) {
+                        HaloCameraMirrorWidget()
                     }
                     if service.busy && options.showStatus { WidgetElement(key: "progress") { ProgressView("Working…") } }
                     if !service.recognizedText.isEmpty {
@@ -1942,6 +1946,7 @@ struct SystemModuleView: View {
     @Environment(\.openNotchAvailableWidth) private var availableWidth
     @Environment(\.openNotchAvailableHeight) private var availableHeight
     @ObservedObject var service: SystemService
+    @ObservedObject private var weather = HaloWeatherService.shared
     private var options: WidgetContentOptions { style.resolvedContent }
     private var footprint: VisualWorkspaceWidgetSize? { VisualWorkspaceWidgetSize.resolve(width: availableWidth, height: availableHeight, presentation: presentation) }
 
@@ -1954,6 +1959,7 @@ struct SystemModuleView: View {
             case .standard, .expanded, .none: systemFull
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: options.alignment.alignment)
+         .onAppear { weather.refresh() }
     }
 
     private var systemGlance: some View {
@@ -2001,6 +2007,16 @@ struct SystemModuleView: View {
                 }
                 WidgetElement(key: "network", defaultPriority: .normal) {
                     HStack(spacing: 8) { Label("Network", systemImage: "arrow.up.arrow.down"); Spacer(); Text("↓ \(Self.rate(service.networkDownPerSecond))").monospacedDigit(); Text("↑ \(Self.rate(service.networkUpPerSecond))").monospacedDigit() }
+                }
+                if weather.isEnabled {
+                    WidgetElement(key: "weather", defaultPriority: .normal) {
+                        HStack(spacing: 8) {
+                            Label("Weather", systemImage: "cloud.sun")
+                            Spacer()
+                            Text(weather.summary).font(.caption).lineLimit(1)
+                        }
+                        .onAppear { weather.refresh() }
+                    }
                 }
                 WidgetElement(key: "power", defaultPriority: .normal) {
                     HStack { Label(service.lowPower ? "Low Power Mode" : "Normal power", systemImage: service.lowPower ? "leaf.fill" : "bolt.fill"); Spacer(); Text(service.onBattery ? "Battery" : "External power").foregroundStyle(.secondary) }
@@ -2454,4 +2470,187 @@ struct LoopingVideo: NSViewRepresentable {
         if state.playing != playing { state.playing = playing; if playing { state.player.play() } else { state.player.pause() } }
     }
     static func dismantleNSView(_ view: AVPlayerView, coordinator: Coordinator) { coordinator.player.pause(); coordinator.looper = nil; coordinator.player.removeAllItems() }
+}
+
+
+// MARK: - Opt-in weather. Manual coordinates prevent implicit location tracking.
+// The only request is to Open-Meteo after the user enables weather in Settings.
+@MainActor
+final class HaloWeatherService: ObservableObject {
+    static let shared = HaloWeatherService()
+    struct Current: Decodable {
+        var temperature_2m: Double
+        var weather_code: Int
+    }
+    private struct Forecast: Decodable { var current: Current }
+    @Published private(set) var current: Current?
+    @Published private(set) var error: String?
+    @Published private(set) var loading = false
+    private var lastFetch = Date.distantPast
+    private var activeTask: Task<Void, Never>?
+    private var lastCoordinates = ""
+
+    var isEnabled: Bool { UserDefaults.standard.bool(forKey: "HaloWeatherEnabled") }
+    var summary: String {
+        if let current { return "\(Int(current.temperature_2m.rounded()))°C · \(Self.condition(current.weather_code))" }
+        return error ?? (loading ? "Loading…" : "Set a location in Settings")
+    }
+    func refresh(force: Bool = false) {
+        guard isEnabled else { current = nil; error = nil; return }
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: "HaloWeatherLatitude") != nil,
+              defaults.object(forKey: "HaloWeatherLongitude") != nil else {
+            error = "Location not set"; return
+        }
+        let lat = defaults.double(forKey: "HaloWeatherLatitude")
+        let lon = defaults.double(forKey: "HaloWeatherLongitude")
+        guard lat.isFinite && lon.isFinite && (-90...90).contains(lat) && (-180...180).contains(lon) else {
+            error = "Invalid coordinates"; return
+        }
+        let locationKey = "\(lat),\(lon)"
+        guard !loading, (force || locationKey != lastCoordinates || Date().timeIntervalSince(lastFetch) > 900) else { return }
+        guard var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast") else { return }
+        components.queryItems = [
+            URLQueryItem(name: "latitude", value: String(lat)),
+            URLQueryItem(name: "longitude", value: String(lon)),
+            URLQueryItem(name: "current", value: "temperature_2m,weather_code")
+        ]
+        guard let url = components.url else { return }
+        loading = true
+        activeTask?.cancel()
+        activeTask = Task {
+            defer { loading = false }
+            do {
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 12
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard !Task.isCancelled else { return }
+                guard (response as? HTTPURLResponse)?.statusCode == 200,
+                      data.count < 100_000 else { throw URLError(.badServerResponse) }
+                let fetched = try JSONDecoder().decode(Forecast.self, from: data)
+                guard fetched.current.temperature_2m.isFinite else { throw URLError(.cannotParseResponse) }
+                current = fetched.current
+                error = nil
+                lastFetch = Date()
+                lastCoordinates = locationKey
+            } catch {
+                self.error = "Weather unavailable"
+            }
+        }
+    }
+    private static func condition(_ code: Int) -> String {
+        switch code {
+        case 0: return "Clear"
+        case 1...3: return "Cloudy"
+        case 45, 48: return "Fog"
+        case 51...67: return "Rain"
+        case 71...77: return "Snow"
+        case 80...82: return "Showers"
+        case 95...99: return "Thunderstorm"
+        default: return "Conditions"
+        }
+    }
+}
+
+// MARK: - Camera mirror, no recording or network upload.
+@MainActor
+final class HaloCameraMirrorService: ObservableObject {
+    static let shared = HaloCameraMirrorService()
+    let session = AVCaptureSession()
+    @Published private(set) var isActive = false
+    @Published private(set) var error: String?
+    private var configured = false
+
+    func start() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: startAuthorized()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] approved in
+                Task { @MainActor in
+                    if approved { self?.startAuthorized() }
+                    else { self?.error = "Camera access denied in System Settings." }
+                }
+            }
+        default:
+            error = "Camera access denied in System Settings."
+        }
+    }
+    private func startAuthorized() {
+        if !configured {
+            guard let camera = AVCaptureDevice.default(for: .video),
+                  let input = try? AVCaptureDeviceInput(device: camera),
+                  session.canAddInput(input) else {
+                error = "No available camera"; return
+            }
+            session.beginConfiguration()
+            session.addInput(input)
+            session.sessionPreset = .medium
+            session.commitConfiguration()
+            configured = true
+        }
+        error = nil
+        isActive = true
+        let capture = session
+        DispatchQueue.global(qos: .userInitiated).async {
+            if !capture.isRunning { capture.startRunning() }
+        }
+    }
+    func stop() {
+        guard isActive else { return }
+        isActive = false
+        let capture = session
+        DispatchQueue.global(qos: .userInitiated).async {
+            if capture.isRunning { capture.stopRunning() }
+        }
+    }
+}
+
+private final class HaloMirrorHostView: NSView {
+    let preview = AVCaptureVideoPreviewLayer()
+    init(session: AVCaptureSession) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        preview.session = session
+        preview.videoGravity = .resizeAspectFill
+        layer?.addSublayer(preview)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func layout() {
+        super.layout()
+        preview.frame = bounds
+        if let connection = preview.connection, connection.isVideoMirroringSupported {
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = true
+        }
+    }
+}
+
+private struct HaloMirrorPreview: NSViewRepresentable {
+    let session: AVCaptureSession
+    func makeNSView(context: Context) -> HaloMirrorHostView { HaloMirrorHostView(session: session) }
+    func updateNSView(_ nsView: HaloMirrorHostView, context: Context) {}
+}
+
+struct HaloCameraMirrorWidget: View {
+    @ObservedObject private var mirror = HaloCameraMirrorService.shared
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if mirror.isActive {
+                HaloMirrorPreview(session: mirror.session)
+                    .frame(minHeight: 100, maxHeight: 190)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                Button("Stop mirror", systemImage: "video.slash") { mirror.stop() }
+                    .buttonStyle(.bordered)
+            } else {
+                Button("Start camera mirror", systemImage: "video") { mirror.start() }
+                    .buttonStyle(.bordered)
+            }
+            if let error = mirror.error {
+                Text(error).font(.caption).foregroundStyle(.secondary)
+            }
+            Text("Camera is only active after you start it; no frames are saved.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .onDisappear { mirror.stop() }
+    }
 }
