@@ -1102,6 +1102,14 @@ final class HaloCoreTests: XCTestCase {
         XCTAssertTrue(rule.matches(app: "", battery: 19, charging: false, displays: 1, hour: 12))
         XCTAssertFalse(rule.matches(app: "", battery: 20, charging: false, displays: 1, hour: 12))
     }
+    func testMediaPlaybackProfileAutomation() {
+        let active = AutomationRule(trigger: .mediaPlaying, value: "true", profileID: UUID())
+        XCTAssertFalse(active.matches(app: "", battery: nil, charging: false, displays: 1, hour: 12, mediaPlaying: false))
+        XCTAssertTrue(active.matches(app: "", battery: nil, charging: false, displays: 1, hour: 12, mediaPlaying: true))
+        let stopped = AutomationRule(trigger: .mediaPlaying, value: "false", profileID: UUID())
+        XCTAssertTrue(stopped.matches(app: "", battery: nil, charging: false, displays: 1, hour: 12, mediaPlaying: false))
+        XCTAssertFalse(stopped.matches(app: "", battery: nil, charging: false, displays: 1, hour: 12, mediaPlaying: true))
+    }
     func testDisabledAutomationDoesNotMatch() {
         let rule = AutomationRule(enabled: false, trigger: .activeApp, value: "Xcode", profileID: UUID())
         XCTAssertFalse(rule.matches(app: "Xcode", battery: nil, charging: false, displays: 1, hour: 1))
