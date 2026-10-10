@@ -1651,6 +1651,52 @@ final class MusicWidgetTests: XCTestCase {
 
 
 final class AudioCIMusicWidgetTests: XCTestCase {
+    func testAudioCIReservesClosedNotchStripOnlyOutsideFullAreaMode() {
+        // SurfaceView allocates max(40, compactHeight) above the Music CI in the VStack.
+        // The requested expanded window must contain BOTH the strip and the music body.
+        XCTAssertEqual(
+            AudioCIExpandedSurfaceSizing.compactStripReservation(
+                usesFullNotchArea: false, compactHeight: 28
+            ), 40
+        )
+        XCTAssertEqual(
+            AudioCIExpandedSurfaceSizing.compactStripReservation(
+                usesFullNotchArea: false, compactHeight: 62
+            ), 62
+        )
+        XCTAssertEqual(
+            AudioCIExpandedSurfaceSizing.compactStripReservation(
+                usesFullNotchArea: true, compactHeight: 62
+            ), 0
+        )
+    }
+
+    func testAudioCIPreferredHeightIncludesStripMarginsAndNeverClampsAt700() {
+        let normal = AudioCIExpandedSurfaceSizing.requestedHeight(
+            contentHeight: 300, topInset: 20, bottomMargin: 18,
+            usesFullNotchArea: false, compactHeight: 44
+        )
+        let full = AudioCIExpandedSurfaceSizing.requestedHeight(
+            contentHeight: 300, topInset: 20, bottomMargin: 18,
+            usesFullNotchArea: true, compactHeight: 44
+        )
+        XCTAssertEqual(full, 338)
+        XCTAssertEqual(normal, 382)
+        XCTAssertEqual(normal - full, 44)
+        XCTAssertEqual(
+            AudioCIExpandedSurfaceSizing.requestedHeight(
+                contentHeight: 680, topInset: 30, bottomMargin: 35,
+                usesFullNotchArea: false, compactHeight: 40
+            ), 785
+        )
+        XCTAssertEqual(
+            AudioCIExpandedSurfaceSizing.requestedHeight(
+                contentHeight: 20, topInset: 5, bottomMargin: 0,
+                usesFullNotchArea: false, compactHeight: 24
+            ), 150
+        )
+    }
+
     func testLegacyPreferencesKeepArtworkAndNoRankings() throws {
         let old = try JSONDecoder().decode(ContextMusicOptions.self, from: Data("{\"showArtwork\":true}".utf8))
         XCTAssertEqual(old.resolvedForegroundArtwork, .cover)
