@@ -595,7 +595,7 @@ final class WorkspaceStore: ObservableObject, LiveActivityProvider {
         var current = Set<UUID>()
         var selected: Profile?
         var selectedRule: AutomationRule?
-        for rule in settings.rules where rule.matches(app: NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "", battery: system.battery, charging: system.charging, displays: NSScreen.screens.count, hour: Calendar.current.component(.hour, from: Date())) {
+        for rule in settings.rules where rule.matches(app: NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "", battery: system.battery, charging: system.charging, displays: NSScreen.screens.count, hour: Calendar.current.component(.hour, from: Date()), mediaPlaying: media.isPlaying) {
             current.insert(rule.id)
             if !matchedRules.contains(rule.id), selected == nil,
                let profile = settings.profiles.first(where: { $0.id == rule.profileID }) {
