@@ -3208,7 +3208,7 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
             Text("Curated starter gallery. Templates are local, do not run code or grant permissions, and are added as editable copies.")
                 .font(.caption).foregroundStyle(.secondary)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 175))], spacing: 10) {
-                ForEach(Profile.presets) { template in
+                ForEach(Profile.presets, id: \.name) { template in
                     VStack(alignment: .leading, spacing: 6) {
                         Label(template.name, systemImage: template.icon ?? "square.grid.2x2")
                             .font(.headline).lineLimit(1)
