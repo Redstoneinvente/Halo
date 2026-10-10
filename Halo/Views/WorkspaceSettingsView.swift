@@ -8612,6 +8612,8 @@ private struct HaloUtilitiesSettingsPane: View {
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject private var weather = HaloWeatherService.shared
     @AppStorage("HaloWeatherEnabled") private var weatherEnabled = false
+    @State private var weatherKeyInput = ""
+    @State private var weatherKeyStatus = ""
     @AppStorage("HaloWeatherLatitude") private var latitude = 0.0
     @AppStorage("HaloWeatherLongitude") private var longitude = 0.0
     @AppStorage("HaloDeveloperActivitiesEnabled") private var developerEnabled = false
@@ -8622,8 +8624,19 @@ private struct HaloUtilitiesSettingsPane: View {
             GroupBox("Weather") {
                 VStack(alignment: .leading, spacing: 8) {
                     Toggle("Enable weather network requests", isOn: $weatherEnabled)
-                    Text("HALO sends manually entered coordinates to Open-Meteo only when enabled. No device location permission is requested.")
+                    Text("Commercial Open-Meteo subscription required. HALO never uses the non-commercial free endpoint; coordinates are sent only after enabling weather and supplying a key.")
                         .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        SecureField("Commercial API key", text: $weatherKeyInput)
+                            .textContentType(.password)
+                        Button("Save key") {
+                            let success = HaloWeatherService.saveCommercialAPIKey(weatherKeyInput)
+                            weatherKeyStatus = success ? "Saved securely in macOS Keychain" : "Keychain error"
+                            if success { weather.refresh(force: true) }
+                        }
+                    }
+                    if !weatherKeyStatus.isEmpty { Text(weatherKeyStatus).font(.caption2) }
+                    Link("Weather data by Open-Meteo (CC BY 4.0)", destination: URL(string: "https://open-meteo.com/")!)
                     HStack {
                         TextField("Latitude", value: $latitude, format: .number)
                         TextField("Longitude", value: $longitude, format: .number)
@@ -8673,6 +8686,9 @@ private struct HaloUtilitiesSettingsPane: View {
                 }.padding(8)
             }
         }
-        .onAppear { if weatherEnabled { weather.refresh() } }
+        .onAppear {
+            weatherKeyInput = HaloWeatherService.commercialAPIKey() ?? ""
+            if weatherEnabled { weather.refresh() }
+        }
     }
 }
