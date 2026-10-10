@@ -1571,14 +1571,14 @@ struct CalendarModuleView: View {
                    service.meetingURL(for: $0) != nil
                }),
                let joinURL = service.meetingURL(for: nextMeeting),
-               availableHeight ?? 250 >= 150 {
+               (availableHeight ?? 250) >= 150 {
                 TimelineView(.periodic(from: .now, by: 30)) { context in
                     HStack(spacing: 8) {
                         Image(systemName: "video.badge.waveform")
                         VStack(alignment: .leading, spacing: 1) {
                             Text(nextMeeting.title ?? "Upcoming meeting").font(.caption.weight(.semibold)).lineLimit(1)
                             let seconds = nextMeeting.startDate.timeIntervalSince(context.date)
-                            Text(seconds > 0 ? "Starts in \\(max(1, Int(ceil(seconds / 60)))) min" : "Meeting in progress")
+                            Text(seconds > 0 ? "Starts in \(max(1, Int(ceil(seconds / 60)))) min" : "Meeting in progress")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 0)
