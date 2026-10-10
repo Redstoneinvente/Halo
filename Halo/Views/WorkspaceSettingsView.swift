@@ -7385,6 +7385,13 @@ private struct AutomationProfileRuleEditor: View {
         case .activeApp:
             InstalledAppSinglePicker(label: "Application", bundleID: $rule.value)
 
+        case .mediaPlaying:
+            Picker("Playback state", selection: $rule.value) {
+                Text("Playing").tag("true")
+                Text("Paused / Stopped").tag("false")
+            }
+            .pickerStyle(.segmented)
+
         case .batteryBelow:
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
