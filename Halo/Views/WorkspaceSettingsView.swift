@@ -95,7 +95,7 @@ struct SettingsView: View {
             SidebarGroup(
                 title: "System & Support",
                 icon: "gearshape.2",
-                items: ["Displays", "Plugins", "Reviews", "Feedback & Support", "About"]
+                items: ["Displays", "Utilities", "Plugins", "Reviews", "Feedback & Support", "About"]
             )
         ]
     }
@@ -438,6 +438,7 @@ struct SettingsView: View {
         case "Schedules": return "calendar.badge.clock"
         case "Automation": return "bolt"
         case "Displays": return "display.2"
+        case "Utilities": return "cloud.sun"
         case "Plugins": return "puzzlepiece.extension"
         case "Reviews": return "star.bubble.fill"
         case "Feedback & Support": return "bubble.left.and.bubble.right.fill"
@@ -778,6 +779,8 @@ struct SettingsView: View {
             } else {
                 HaloLiteDisplaySettingsPane(store: store)
             }
+        case "Utilities":
+            HaloUtilitiesSettingsPane(workspace: workspace)
         case "Plugins":
             if featureAccess.allows(.plugins) {
                 Text("Declarative plugins add URL commands to the launcher. Each command requires confirmation. Native executable plugins are not loaded.")
@@ -3201,6 +3204,35 @@ private enum HaloAppearancePage: String, CaseIterable, Identifiable {
     @State private var name = "My profile"
     var body: some View {
         HStack { TextField("New profile name", text: $name); Button("Save current") { workspace.saveProfile(name: name, theme: store.configuration.theme) } }
+        DisclosureGroup {
+            Text("Curated starter gallery. Templates are local, do not run code or grant permissions, and are added as editable copies.")
+                .font(.caption).foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 175))], spacing: 10) {
+                ForEach(Profile.presets) { template in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(template.name, systemImage: template.icon ?? "square.grid.2x2")
+                            .font(.headline).lineLimit(1)
+                        Text("\(template.layout.enabled.count) modules · \(template.theme.style.rawValue)")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Install template") {
+                            var copy = template
+                            copy.id = UUID()
+                            if workspace.settings.profiles.contains(where: { $0.name == copy.name }) {
+                                copy.name += " template"
+                            }
+                            workspace.settings.profiles.append(copy)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.accentColor.opacity(0.05), in: RoundedRectangle(cornerRadius: 11))
+                }
+            }
+        } label: {
+            Label("Explore 8 workspace templates", systemImage: "square.grid.3x2")
+                .font(.headline)
+        }
         Picker("View", selection: $cards) { Label("Cards", systemImage: "square.grid.2x2").tag(true); Label("List", systemImage: "list.bullet").tag(false) }.pickerStyle(.segmented)
         LazyVGrid(columns: cards ? [GridItem(.adaptive(minimum: 220), alignment: .top)] : [GridItem(.flexible())], alignment: .leading, spacing: 12) {
             ForEach(workspace.settings.profiles) { profile in
@@ -8570,5 +8602,77 @@ private struct LauncherFavoriteApplicationsSheet: View {
         }.value
         applications = discovered
         isLoading = false
+    }
+}
+
+
+// MARK: - Opt-in integrations in one discoverable settings location.
+@MainActor
+private struct HaloUtilitiesSettingsPane: View {
+    @ObservedObject var workspace: WorkspaceStore
+    @ObservedObject private var weather = HaloWeatherService.shared
+    @AppStorage("HaloWeatherEnabled") private var weatherEnabled = false
+    @AppStorage("HaloWeatherLatitude") private var latitude = 0.0
+    @AppStorage("HaloWeatherLongitude") private var longitude = 0.0
+    @AppStorage("HaloDeveloperActivitiesEnabled") private var developerEnabled = false
+    @AppStorage("HaloMeetingCompanionEnabled") private var meetingEnabled = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            GroupBox("Weather") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Enable weather network requests", isOn: $weatherEnabled)
+                    Text("HALO sends manually entered coordinates to Open-Meteo only when enabled. No device location permission is requested.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        TextField("Latitude", value: $latitude, format: .number)
+                        TextField("Longitude", value: $longitude, format: .number)
+                        Button("Refresh") { weather.refresh(force: true) }
+                    }
+                    .disabled(!weatherEnabled)
+                    Text(weatherEnabled ? weather.summary : "Off").font(.caption)
+                }.padding(8)
+            }
+            .onChange(of: weatherEnabled) { _ in weather.refresh(force: true) }
+            .onChange(of: latitude) { _ in weather.refresh(force: true) }
+            .onChange(of: longitude) { _ in weather.refresh(force: true) }
+
+            GroupBox("Developer Live Activities") {
+                VStack(alignment: .leading, spacing: 7) {
+                    Toggle("Read local developer activity snapshots", isOn: $developerEnabled)
+                    Text("Optional read-only bridge for Xcode, Unity and coding-agent scripts. Source data stays local and expires if the producer stops updating.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let url = WorkspaceStore.developerActivityFileURL {
+                        HStack {
+                            Text(url.path).font(.caption.monospaced()).textSelection(.enabled).lineLimit(2)
+                            Button("Copy path") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(url.path, forType: .string)
+                            }
+                        }
+                    }
+                }.padding(8)
+            }
+
+            GroupBox("Meeting companion") {
+                VStack(alignment: .leading, spacing: 7) {
+                    Toggle("Show joinable upcoming meetings in Calendar", isOn: $meetingEnabled)
+                    Text("Uses existing Calendar authorization. A countdown and a safe HTTPS Join link appear near qualifying events. HALO does not control other apps' microphone or camera.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if !workspace.calendar.hasAccess {
+                        Button("Enable Calendar access") { workspace.calendar.requestAccessIfNeeded() }
+                    }
+                }.padding(8)
+            }
+
+            GroupBox("Camera mirror") {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("The Capture widget includes a Camera Mirror element, off by default. You can also preview it here; HALO asks for camera permission only after you press Start.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HaloCameraMirrorWidget()
+                }.padding(8)
+            }
+        }
+        .onAppear { if weatherEnabled { weather.refresh() } }
     }
 }
