@@ -2829,7 +2829,7 @@ final class WindowManager {
         let requestedMinimum = host.state.contextMinimumExpandedWidth ?? 360
         let physicalMinimum = geometry.attachedToNotch && geometry.physicalNotchWidth > 0
             ? geometry.physicalNotchWidth + 24 : 160
-        let minimumWidth = max(160, max(requestedMinimum, physicalMinimum))
+        let minimumWidth = max(160, max(requestedMinimum, physicalMinimum, geometry.minimumAlignedExpandedWidth))
         let maxWidth = max(minimumWidth, geometry.visible.width - margin * 2)
         let width = min(maxWidth, max(minimumWidth, requested.width))
         var height = max(minimumHeight, requested.height)

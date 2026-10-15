@@ -301,9 +301,23 @@ struct SurfaceGeometry {
     var expandedWidth: Double
     var activeCompactWidth: Double? = nil
     var activeCompactHeight: Double? = nil
-    /// Dynamic horizontal bias for closed mode. Negative grows toward the left, positive toward the right.
+    /// Dynamic horizontal bias for asymmetric closed widgets. Negative grows to the left.
     var activeCompactCenterOffset: Double? = nil
     var attachedToNotch: Bool { (style == .notch && safeAreaTop > 0) || style == .simulated }
+
+    /// Notch-style surfaces keep the same horizontal center during opening/closing instead
+    /// of snapping back to screen center when only one closed wing contains widgets.
+    /// Independent user-defined opened/closed X offsets still apply after this bias.
+    var expandedAlignmentBias: Double {
+        guard style == .notch || style == .simulated else { return 0 }
+        return activeCompactCenterOffset ?? 0
+    }
+
+    /// Preserve the closed wing's camera coverage if the configured opened size is
+    /// narrower than an asymmetrically sized closed notch.
+    var minimumAlignedExpandedWidth: Double {
+        expandedAlignmentBias == 0 ? 0 : compactWidth
+    }
     var minimumWidth: Double { 16 }
     var compactWidth: Double {
         let base = style == .shelf ? max(320, appearance.compactWidth) : style == .menuBar ? visible.width - 24 : appearance.compactWidth
@@ -331,7 +345,7 @@ struct SurfaceGeometry {
         var width = compactWidth
         if expanded {
             let requested = style == .menuBar ? visible.width - 24 : style == .shelf ? max(expandedWidth, 720) : expandedWidth
-            width = Geometry.width(screenWidth: visible.width, requested: max(appearance.compactWidth, requested))
+            width = Geometry.width(screenWidth: visible.width, requested: max(appearance.compactWidth, requested, minimumAlignedExpandedWidth))
         }
         let height = max(1, min(visible.height - 16, expanded ? appearance.expandedHeight + max(40, compactHeight) : compactHeight))
         // A real notch belongs to the physical display, not to visibleFrame. Using screen.midX
@@ -339,7 +353,7 @@ struct SurfaceGeometry {
         let horizontalCenter = attachedToNotch && physicalNotchWidth > 0 ? screen.midX : visible.midX
         var x = horizontalCenter - width / 2
         var y = (attachedToNotch ? screen.maxY : visible.maxY - 8) - height
-        if !expanded { x += activeCompactCenterOffset ?? 0 }
+        x += expanded ? expandedAlignmentBias : (activeCompactCenterOffset ?? 0)
         switch style {
         case .left: x = visible.minX + 8; y = visible.midY - height / 2
         case .right: x = visible.maxX - width - 8; y = visible.midY - height / 2

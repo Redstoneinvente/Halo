@@ -14,6 +14,16 @@ Settings now uses an explicit sidebar, search field and content heading inside t
 
 Displays → Customize closed size, shape and transitions creates an independent layout snapshot. Controls there apply to that display. Use Follow global modules and background to restore global appearance inheritance.
 
+## Asymmetric closed-widget opening alignment
+
+Notch and simulated-notch placements retain the horizontal center of an asymmetrically
+extended closed notch during opening and closing. Opening no longer forces the panel
+back to the display center when a widget occupies only one side. If the closed surface
+is wider than the chosen opened width, the opened surface expands enough to preserve
+the closed notch's coverage, including for content-sized Context Interfaces. Explicit
+opened and closed X offsets remain independent and can still intentionally move the
+surface. Other placements preserve their existing anchoring.
+
 ## Eight contours
 
 Rounded rectangle, Capsule, Squircle, Soft notch, Shouldered notch, Cut corners, Tapered and Asymmetric corners. Shoulder depth applies to shouldered/cut/tapered shapes; asymmetric shapes have separate top/bottom radii. The preview, visible background, border and hit-test contour use the same Shape implementation. Placement and shape are independent.

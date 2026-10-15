@@ -821,6 +821,52 @@ final class HaloCoreTests: XCTestCase {
         model.activeCompactWidth = nil
         XCTAssertEqual(model.frame(expanded: false), idle)
     }
+    func testAsymmetricClosedWidgetsDoNotRecenterWhenNotchOpens() {
+        for bias in [-105.0, 105.0] {
+            var model = geometry(requested: 190)
+            model.activeCompactWidth = 510
+            model.activeCompactCenterOffset = bias
+
+            let closed = model.frame(expanded: false)
+            let opened = model.frame(expanded: true)
+            let camera = CGRect(
+                x: model.screen.midX - model.physicalNotchWidth / 2,
+                y: model.screen.maxY - model.safeAreaTop,
+                width: model.physicalNotchWidth,
+                height: model.safeAreaTop
+            )
+
+            XCTAssertEqual(opened.midX, closed.midX, accuracy: 0.001)
+            XCTAssertGreaterThanOrEqual(opened.width, closed.width)
+            XCTAssertLessThanOrEqual(opened.minX, camera.minX)
+            XCTAssertGreaterThanOrEqual(opened.maxX, camera.maxX)
+            XCTAssertEqual(model.frame(expanded: false), closed)
+        }
+    }
+    func testAsymmetricOpeningStillHonorsIndependentUserOffsets() {
+        var model = geometry(requested: 190)
+        model.activeCompactWidth = 460
+        model.activeCompactCenterOffset = -80
+        model.appearance.surface.offsets = SurfaceOffsets(openedX: 25, closedX: -35)
+        let closed = model.frame(expanded: false)
+        let opened = model.frame(expanded: true)
+
+        XCTAssertEqual(opened.midX - closed.midX, 60, accuracy: 0.001)
+    }
+    func testNonNotchPlacementsRemainCenteredWithoutInheritedCompactBias() {
+        for placement in [SurfaceStyle.pill, .island, .shelf, .menuBar] {
+            var model = geometry(style: placement)
+            let originalOpen = model.frame(expanded: true)
+            model.activeCompactCenterOffset = 75
+
+            XCTAssertEqual(model.frame(expanded: true), originalOpen)
+        }
+    }
+    func testSimulatedNotchPreservesAsymmetricClosedCenter() {
+        var model = geometry(style: .simulated, safeArea: 0, requested: 220)
+        model.activeCompactCenterOffset = 65
+        XCTAssertEqual(model.frame(expanded: true).midX, model.frame(expanded: false).midX, accuracy: 0.001)
+    }
     func testActiveWidthNeverShrinksConfiguredWidth() {
         var model = geometry(requested: 500)
         model.activeCompactWidth = 300
