@@ -237,6 +237,7 @@ extension ModuleID {
                 .init("diskUsage", "Disk usage", "Current disk utilization."),
                 .init("network", "Network throughput", "Current network receive/transmit rate."),
                 .init("thermal", "Thermal state", "macOS thermal-pressure state.", defaultVisible: false),
+                .init("weather", "Weather", "Opt-in current weather from a manually configured location."),
                 .init("graphs", "Compact graphs", "Recent CPU, memory and network history.", defaultVisible: false),
                 .init("device", "Mac details", "macOS version and logical processor count.", defaultVisible: false)
             ]
@@ -268,7 +269,8 @@ extension ModuleID {
                 .init("progress", "Busy indicator", "Progress while capture/OCR is running."),
                 .init("result", "OCR result", "Recognized text."),
                 .init("resultActions", "Result actions", "Copy or clear recognized text."),
-                .init("status", "Capture status", "Errors and capture status.")
+                .init("status", "Capture status", "Errors and capture status."),
+                .init("mirror", "Camera mirror", "Opt-in live camera preview; no recording or uploading.", defaultVisible: false)
             ]
         case .stopwatch:
             return [

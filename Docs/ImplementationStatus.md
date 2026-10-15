@@ -1,69 +1,47 @@
-# Implementation status — 0.2
+# Implementation status | reconciled source review
 
-“Implemented” below means source is wired into the project, not macOS-tested. No Apple SDK compilation or runtime checks were possible in the build environment.
+**Review:** 2026-10-10. **Baseline:** `main` at `969fd7a36c08ddada57164b63fa693375b45ec1e`.
 
-Updated after commit 0e24329: closed sizing bug fixed; eight contours, separate opening/closing transitions, adjustable duration and spring damping, persistent panel hosts, module drag ordering, profile rename, shelf pins, metadata and Quick Look are now implemented. See NotchCustomization.md.
+This replaces a historical Halo 0.2 prototype checklist that was out of sync with the current repository. **Source present is not equivalent to built, tested, approved or shipped.** This audit did not run Xcode, exercise macOS UI flows, verify StoreKit renewals, notarize an app, or measure energy usage.
 
-| Area | Present in this package | Remaining from the original brief |
+See [FeatureExpansion2026-10.md](FeatureExpansion2026-10.md) for this branch's new code paths, [FeatureReconciliation.md](FeatureReconciliation.md) for context, source links and a prioritized roadmap; [FeatureInventory.json](FeatureInventory.json) for evidence markers; `python3 Scripts/check_feature_inventory.py` for a no-dependency drift check.
+
+| Subsystem | Current source status | Remaining verification / important scope |
 | --- | --- | --- |
-| Notch/windows | Safe-area measurement, ten placements, persistent panel hosts, working closed size controls, eight contours, per-display snapshots | Hardware validation, freeform position persistence across launches, user-authored contours |
-| Interaction | Hover, click toggle, context menu, pin, drag/drop, configurable modifier/key preset hotkey | Full gesture binding editor, wheel volume, swipe/long-press actions, arbitrary key recording |
-| Modules | Fourteen selectable views, ordering, per-widget fonts/colors/card dimensions, configurable clock | Priorities, interactive compact variants for every module |
-| Focus | Deadline timer, pause/resume/reset, completion activity/sound, authorized notification, stopwatch | Pomodoro cycles, task history, world clocks, reminders and productivity analytics |
-| Shelf | References, drag in/out, Quick Look, file metadata, pins, open/reveal/share, expiry timestamps and opt-in persistence | Controlled move/copy workflows, reliable bookmark tracking, thumbnail caching |
-| Media | Apple Music/Spotify controls, automatic detection and playback polling, nine closed-notch playback animations and opt-in artwork palettes | Artwork display, progress/seek, shuffle/repeat, browser/universal media, lyrics, audio-sampled visualizer |
-| Audio | Output enumeration/selection, supported master-volume control | Input selection, microphone mute, per-channel fallback, accessory battery |
-| Calendar | Today's remaining events and recognized meeting links, optional EventKit access | Reminders, broader schedule navigation, richer countdown presentations |
-| Clipboard | Optional bounded RAM text history, search/copy/remove, exclusions and sensitive markers | Images, rich text, files, pin/favorites, provenance guarantees |
-| Capture | User-triggered region capture, save and shelf handoff, local OCR from chosen images | Screenshot-directory watcher, annotation, screen recording, automatic OCR handoff |
-| System | Battery/charging/AC, installed RAM, free disk, uptime, low-power status | CPU/GPU usage, used memory/swap, network throughput, graphs, supported thermal metrics, alerts |
-| Launcher | Running apps, choose app, Downloads, fuzzy timer/plugin commands | Indexed app catalog, favorites/recents persistence, full command-palette window |
-| Developer | Read-only Git status in a selected folder | Build/run/test commands, server/Docker integrations, branch/commit widgets |
-| Live activities | Internal model/API and timer completion list | External progress ingestion, compact prioritization, downloads/build/render tracking |
-| Appearance | Image/video/solid/gradient/glass; blur/saturation/brightness; eight shapes, six transitions, grain/warmth and side icons/GIFs | Shader editor, broad effect stacks, audio reaction, artwork/wallpaper integration, icon editor |
-| Themes/profiles | v1/v2 theme import/export; backward-compatible appearance decoding; presets; save/rename/duplicate/delete; display snapshots | Editor polish, share UI, marketplace; portable bundled image/video assets |
-| Automation | Five condition types, scheduled profiles/backgrounds, weekdays/overnight windows, edge triggering | App-open/close, audio/Focus/Wi-Fi triggers; generalized action UI, approved scripts/shortcuts |
-| Plugins | Validated declarative URL commands, installation/revocation, per-run confirmation | Native module loading and secure process isolation, third-party trigger/activity providers |
-| Weather and AI | Provider contracts only | Provider implementation, key management, disclosure/consent UX, feature views |
-| Licensing | Offline signature/expiry verification with tests; no gates | Production public key, issuer, purchase/import UI, entitlement integration |
-| Release | Hardened-runtime settings, permission descriptions, archive/export/notarize scripts, Xcode logic tests | Successful Mac build, integration tests, app icon, updater, signing/notarization execution, accessibility/performance QA, distribution policy review |
+| Modes, layout, presentation | Simple/Advanced, visual editor, closed/open surface controls, profiles, per-display settings, HUD and app bubbles are present | Real notched/external display QA, clipping, full-screen, Stage Manager, animation interruption |
+| Widgets | 14 cases listed in `ModuleID.allCases`; an additional developer enum case is declared but excluded | Verify all standard widgets and adaptive footprints independently |
+| Profiles and schedules | Eight presets, saved profiles, schedule windows, automation for app/battery/charging/display/hour | Manual override semantics, rule priority/conflicts, persistence; new branch shows session-only last activation explanation |
+| Media | Apple Music/Spotify, Safari bridge/system audio paths, seeking, shuffle/repeat handling, artwork, lyrics and spectrum present | Per-player capability matrix, scrub correctness, permission denial, stale playback, lyric fallback consent |
+| System | CPU/memory/swap/disk/network/thermal sampling exists, detailed reads mainly when open | Accuracy/energy measurements, hardware availability and non-invasive polling |
+| Bluetooth | Connection events and contextual UI paths exist | Hardware testing, privacy prompts, reconnection and stale state |
+| Clipboard | Basic text-only module plus separate image/file-aware Clipboard CI with bounded memory history | Sensitive-copy exclusions, user consent, high-frequency clipboard polling, UX consistency and clear retention policy |
+| Files | Shelf, metadata, pins, drag operations and Quick Look paths present | Move/copy workflows, bookmarks, sandbox scoping, missing files, collision handling |
+| Capture/OCR | ScreenCaptureKit region capture and Vision OCR paths present | Screen Recording permission transition, cancel/denied/fullscreen behavior, freeze regression |
+| Live Activities | Internal activity model, accessibility-based notification/call source available by opt-in | Mac accessibility runtime QA, false positives, privacy, external agent activity ingestion |
+| Custom Interfaces | Declarative CI SDK, trigger router, registration and app integration broker paths present | Fuzz tests, capability boundary enforcement, portability, documented public versioning |
+| Pixel Pal and other surfaces | Advanced Pixel Pal, environmental reactions, teleprompter/menu-bar paths in source | Native macOS/Reduce Motion QA, clipping, resource footprint |
+| Updates | Direct-build Sparkle controller is present but requires valid appcast/signing-key configuration; App Store variant excludes Sparkle | Production feed, signature, rollback, signed release and update install |
+| Purchases | StoreKit subscription, license and feature gate paths in source | Real purchase/renewal/restore, cancellation, entitlement migration, variant QA |
+| Weather | Commercial-key Open-Meteo provider with manual coordinates and Keychain-backed key was added in this branch; requires opt-in | Purchase/activate paid provider, confirm networking entitlement, test provider results and attribution |
+| AI | Provider contract | Actual provider, data disclosures, key management, privacy and consent |
+| Developer workspaces | Added bounded, opt-in file-fed Live Activity ingestion; existing internal primitives preserved | Native Xcode/Unity/Codex adapters, richer progress semantics and macOS sandbox-path QA |
+| Sharing/marketplace | Added installable local eight-template gallery and existing theme/layout export-import | Online community upload, signed packages, moderation, assets and permission isolation |
+| Native Shortcuts/camera mirror/iPhone | Added first-party App Intents and opt-in camera mirror; no iPhone app in this repository | Build and runtime tests for Shortcuts and AVFoundation; iPhone sync app remains future |
 
-## Widget and performance update
+## Verification completed in this branch
 
-Settings → Widgets edits each module's typography, text/accent/background colors, card dimensions, padding, corners and title visibility live. Clock adds font presets and installed fonts, seconds, 12/24-hour time, date and time zone. Settings → Closed notch configures two slots with camera-space reservation and nine playback decorations with optional artwork colors and speed/intensity/size controls. Preferences persist in layouts, profiles and exported themes; older layouts retain defaults.
+- Reviewed active Swift services, models, Xcode build variants, CI SDK, app integrations, workspace settings and media presentation code.
+- Reconciled previous documents against source-backed evidence instead of treating the 0.2 README as authoritative.
+- Implemented a **session-only explanation for the most recent automatic profile activation** in Automation settings, an additional playback automation trigger and the seven scoped feature expansions in [FeatureExpansion2026-10.md](FeatureExpansion2026-10.md).
+- Added a machine-readable inventory and source-evidence drift checker.
 
-Animation ticks update only a viewport wrapper, preferences are saved after slider activity settles and flushed at shutdown, background images are downsampled off the main thread, shelf icons/metadata are cached while rows are mounted, and video transport changes only when playback state changes. Glass uses native behind-window material with a capped tint, outside SwiftUI blur filters. These are code-level performance improvements; frame rate and energy use still need measurement on a Mac.
+## Verification still required
 
-See [WidgetCustomization.md](WidgetCustomization.md) for usage and the focused Mac validation matrix.
+1. On macOS run `python3 Scripts/check_feature_inventory.py` and `bash Scripts/validate.sh`. Capture passing/failing output.
+2. Build both Halo Direct and Halo App Store schemes. Check frameworks, signing, entitlements and StoreKit configuration.
+3. Test hover, pin, compact/open dimensions, widgets, multiple displays, fullscreen, Spaces, sleep and wake.
+4. Reproduce and regress past reports: media scrubber, Pixel Pal flicker, screen-capture grant/freeze, clipped content and stuck closed notch.
+5. Check accessibility, Reduce Motion, user permissions, data retention and power/CPU usage in Instruments.
+6. Conduct release/install/upgrade tests on clean Macs. Avoid claiming a successful production build until actual artifacts pass.
 
-## Verification performed here
-
-- Project IDs and references, every Swift source membership, test scheme, entitlement XML and example JSON.
-- Swift grammar parsing for app and test sources.
-- Shell script syntax checks and ZIP integrity checks at packaging time.
-
-## Verification not performed
-
-Xcode build, XCTest execution, SDK availability/type correctness, actual permissions, Spaces/fullscreen behavior, sleep/wake integration, multiple display hardware, energy/CPU/GPU profiling, signing/notarization, and Gatekeeper installation.
-
-## Next engineering gates
-
-1. Run Scripts/validate.sh on a Mac; resolve all compiler/API and test failures.
-2. Run ReleaseChecklist.md's manual matrix and add service-level/UI regression coverage.
-3. Decide which outstanding brief items are mandatory for 1.0; implement/test them as vertical slices.
-4. Design executable plugin isolation before loading any third-party code.
-5. Add production identity/updater and complete signed/notarized release validation.
-
-This package is an expanded development build. It is not the completed production product described by the original brief.
-
-## Scheduling and rendering follow-up
-
-Automatic Music/Spotify detection now uses player notifications and fallback polling without publishing busy state on every scan. Power/disk sampling runs off the main thread, unchanged snapshots are not republished, and dashboard content uses a stable width with lazy module creation during surface resizing. Cosmetic settings changes no longer snap an in-flight transition to its endpoint.
-
-Profiles support weekday/time windows as runtime overrides without overwriting the user's base layout. Backgrounds support independent timed windows. Static grain/warmth and independently conditioned side icons/GIFs are wired into profiles/themes; imported local image paths are stripped. Pinned files, capture/OCR and recent file additions participate in horizontal expansion.
-
-Source checks and regression cases have been added; native compilation, Apple Events permission behavior, GIF rendering and measured frame pacing still require macOS validation. See Personalization.md.
-
-## Display cadence and closed-content fit
-
-Replaced fixed transition/visualizer timers with view-linked display callbacks on macOS 14+ (up to 120 fps, refresh-rate-matched timer fallback on macOS 13). Font/time-zone selection uses searchable lazy lists. Closed-content auto-sizing measures text and includes decoration/visualizer widths and offset camera space; child content is constrained to the padded closed height. Frame-rate policy and sizing math have regression cases. Native compilation and Instruments measurements remain required.
+See [ReleaseChecklist.md](ReleaseChecklist.md) for more.

@@ -22,9 +22,9 @@ Theme import clamps finite numeric ranges, normalizes module order, strips asset
 
 ## Integrations
 
-CalendarService uses EventKit and a version-gated access request. MediaService serializes fixed AppleScript commands with a five-second Apple-event timeout; it does not implement system-wide Now Playing. AudioService enumerates output streams and reads/writes the selected device's master volume only where supported. ClipboardService recognizes common concealed/transient markers and user app exclusions. SystemService reads installed memory, free storage, uptime and IOKit battery state; these are not CPU/GPU usage measurements.
+CalendarService uses EventKit and a version-gated access request. MediaService includes serialized Apple Music/Spotify scripting and connected metadata, with Safari bridging and MediaRemote/system-audio fallback paths. Availability and transport capabilities depend on player, permissions, and distribution variant. AudioService enumerates output streams and reads/writes the selected device's master volume only where supported. The regular ClipboardService keeps bounded, in-memory text history with common concealed/transient markers and app exclusions. A separate Clipboard Context Interface implements image/file-aware history and actions; they are not one unified persistent clipboard service. SystemService samples CPU, memory, swap, disk, network and thermal indicators in its detailed/open state (not guaranteed GPU monitoring).
 
-CaptureService invokes the system region-selection tool only after user action and screen-capture access; Vision text recognition runs off the main thread. Git status runs off-main with fixed arguments and no optional locks. It has no build/run/test execution interface.
+CaptureService uses a selected screen region with ScreenCaptureKit and an explicit Screen Recording permission check; OCR uses on-device Vision. Newly granted Screen Recording permission intentionally asks for an app restart before retrying. Git status runs off-main with fixed arguments and no optional locks. It has no build/run/test execution interface.
 
 Polling: two-second clipboard change-count sampling, ten-second power/rule updates, calendar once per minute when globally enabled, shelf expiration every thirty seconds while a surface is mounted. Event observers refresh apps and screen state. This implementation has not been energy-profiled.
 
@@ -40,7 +40,7 @@ SignedLicense verifies Ed25519 signatures through CryptoKit, product identity, s
 
 ## Known boundaries
 
-No executable-plugin isolation, universal media transport, shader editor, network monitoring, comprehensive gestures, unattended task execution, updater, or production performance guarantees. See ImplementationStatus.md for the complete handoff.
+Current boundaries: no safe executable-plugin isolation, no verified universal media controls across every player, no confirmed shader editor, no unattended third-party code execution, and no production performance guarantees. Network sampling is present. A Direct-build Sparkle updater controller exists but requires production appcast/public signing key configuration; App Store builds must not bundle it. See FeatureReconciliation.md and ImplementationStatus.md.
 
 ## Custom CI runtime path
 
