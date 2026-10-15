@@ -4,7 +4,6 @@ import Foundation
 import CoreGraphics
 import UniformTypeIdentifiers
 import EventKit
-import Darwin
 
 enum VinylStylePreset: String, Codable, CaseIterable, Identifiable {
     case classic = "Classic"
@@ -550,671 +549,6 @@ struct VinylStyleSettingsView: View {
     private func percent(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
 }
 
-
-// MARK: - Transfer Context Interface
-
-@MainActor
-final class TransferActivityMonitor: ObservableObject {
-    static let shared = TransferActivityMonitor()
-
-    @Published private(set) var downloadBytesPerSecond: Double = 0
-    @Published private(set) var uploadBytesPerSecond: Double = 0
-    @Published private(set) var peakDownloadBytesPerSecond: Double = 0
-    @Published private(set) var peakUploadBytesPerSecond: Double = 0
-    @Published private(set) var sessionDownloadedBytes: Double = 0
-    @Published private(set) var sessionUploadedBytes: Double = 0
-    @Published private(set) var sessionStartedAt: Date?
-    @Published private(set) var isActive = false
-    @Published private(set) var direction = "Idle"
-    @Published private(set) var downloadHistory: [Double] = []
-    @Published private(set) var uploadHistory: [Double] = []
-
-    private var timer: Timer?
-    private var previousBytes: (received: UInt64, sent: UInt64)?
-    private var previousDate = Date()
-    private var lastBusyDate = Date.distantPast
-    private var busySamples = 0
-
-    private init() {
-        previousBytes = networkByteTotals()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.sample() }
-        }
-        if let timer { RunLoop.main.add(timer, forMode: .common) }
-    }
-
-    private func preference(_ key: String, fallback: Double) -> Double {
-        guard UserDefaults.standard.object(forKey: key) != nil else { return fallback }
-        return UserDefaults.standard.double(forKey: key)
-    }
-
-    private func preference(_ key: String, fallback: Bool) -> Bool {
-        guard UserDefaults.standard.object(forKey: key) != nil else { return fallback }
-        return UserDefaults.standard.bool(forKey: key)
-    }
-
-    private func sample() {
-        let now = Date()
-        let totals = networkByteTotals()
-        guard let previousBytes else {
-            self.previousBytes = totals
-            previousDate = now
-            return
-        }
-        self.previousBytes = totals
-        let elapsed = max(0.1, now.timeIntervalSince(previousDate))
-        previousDate = now
-
-        let receivedDelta = totals.received >= previousBytes.received ? totals.received - previousBytes.received : 0
-        let sentDelta = totals.sent >= previousBytes.sent ? totals.sent - previousBytes.sent : 0
-        downloadBytesPerSecond = Double(receivedDelta) / elapsed
-        uploadBytesPerSecond = Double(sentDelta) / elapsed
-
-        let historyLimit = 60
-        downloadHistory.append(downloadBytesPerSecond)
-        uploadHistory.append(uploadBytesPerSecond)
-        if downloadHistory.count > historyLimit { downloadHistory.removeFirst(downloadHistory.count - historyLimit) }
-        if uploadHistory.count > historyLimit { uploadHistory.removeFirst(uploadHistory.count - historyLimit) }
-
-        let threshold = max(0.01, preference("HaloContextTransferThresholdMBps", fallback: 0.35)) * 1_000_000
-        let reactDownloads = preference("HaloContextTransferReactDownloads", fallback: true)
-        let reactUploads = preference("HaloContextTransferReactUploads", fallback: true)
-        let downloadBusy = reactDownloads && downloadBytesPerSecond >= threshold
-        let uploadBusy = reactUploads && uploadBytesPerSecond >= threshold
-        let busy = downloadBusy || uploadBusy
-
-        if downloadBusy && uploadBusy { direction = "Uploading + Downloading" }
-        else if downloadBusy { direction = "Downloading" }
-        else if uploadBusy { direction = "Uploading" }
-        else if isActive { direction = downloadBytesPerSecond >= uploadBytesPerSecond ? "Downloading" : "Uploading" }
-        else { direction = "Idle" }
-
-        if busy {
-            busySamples += 1
-            lastBusyDate = now
-            if !isActive && busySamples >= 2 {
-                isActive = true
-                sessionStartedAt = now
-                sessionDownloadedBytes = 0
-                sessionUploadedBytes = 0
-                peakDownloadBytesPerSecond = 0
-                peakUploadBytesPerSecond = 0
-            }
-        } else {
-            busySamples = 0
-        }
-
-        if isActive {
-            sessionDownloadedBytes += Double(receivedDelta)
-            sessionUploadedBytes += Double(sentDelta)
-            peakDownloadBytesPerSecond = max(peakDownloadBytesPerSecond, downloadBytesPerSecond)
-            peakUploadBytesPerSecond = max(peakUploadBytesPerSecond, uploadBytesPerSecond)
-            let linger = max(0, preference("HaloContextTransferLingerSeconds", fallback: 2.5))
-            if !busy && now.timeIntervalSince(lastBusyDate) > linger {
-                isActive = false
-                direction = "Idle"
-                sessionStartedAt = nil
-            }
-        }
-    }
-
-    private func networkByteTotals() -> (received: UInt64, sent: UInt64) {
-        var pointer: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&pointer) == 0, let first = pointer else { return (0, 0) }
-        defer { freeifaddrs(pointer) }
-        var received: UInt64 = 0
-        var sent: UInt64 = 0
-        var current: UnsafeMutablePointer<ifaddrs>? = first
-        while let item = current {
-            let entry = item.pointee
-            let flags = Int32(entry.ifa_flags)
-            if (flags & IFF_UP) != 0, (flags & IFF_LOOPBACK) == 0, let raw = entry.ifa_data {
-                let data = raw.assumingMemoryBound(to: if_data.self).pointee
-                received &+= UInt64(data.ifi_ibytes)
-                sent &+= UInt64(data.ifi_obytes)
-            }
-            current = entry.ifa_next
-        }
-        return (received, sent)
-    }
-}
-
-private struct TransferHistoryGraph: View {
-    let download: [Double]
-    let upload: [Double]
-
-    var body: some View {
-        GeometryReader { proxy in
-            let maxValue = max(1, (download + upload).max() ?? 1)
-            ZStack {
-                path(values: download, size: proxy.size, maxValue: maxValue)
-                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                path(values: upload, size: proxy.size, maxValue: maxValue)
-                    .stroke(Color.orange, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
-            }
-        }
-    }
-
-    private func path(values: [Double], size: CGSize, maxValue: Double) -> Path {
-        Path { path in
-            guard values.count > 1 else { return }
-            for (index, value) in values.enumerated() {
-                let x = size.width * CGFloat(index) / CGFloat(max(1, values.count - 1))
-                let y = size.height - size.height * CGFloat(min(1, max(0, value / maxValue)))
-                if index == 0 { path.move(to: CGPoint(x: x, y: y)) }
-                else { path.addLine(to: CGPoint(x: x, y: y)) }
-            }
-        }
-    }
-}
-
-private struct TransferActivityIndicator: View {
-    @ObservedObject var monitor: TransferActivityMonitor
-    let compact: Bool
-    @AppStorage("HaloContextTransferIndicatorStyle") private var style = "Edge Bar"
-    @AppStorage("HaloContextTransferIndicatorShowSpeed") private var showSpeed = true
-    @AppStorage("HaloContextTransferIndicatorThickness") private var thickness = 3.0
-    @AppStorage("HaloContextTransferIndicatorIntensity") private var intensity = 1.0
-    @AppStorage("HaloContextTransferThresholdMBps") private var thresholdMBps = 0.35
-
-    private var uploadOnly: Bool {
-        monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading")
-    }
-    private var accent: Color { uploadOnly ? .orange : .accentColor }
-    private var currentSpeed: Double { max(monitor.downloadBytesPerSecond, monitor.uploadBytesPerSecond) }
-    private var activity: Double {
-        let threshold = max(50_000, thresholdMBps * 1_000_000)
-        return min(1, max(0.10, currentSpeed / (threshold * 5)))
-    }
-
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                switch style {
-                case "Center Pulse":
-                    HStack(spacing: 8) {
-                        Image(systemName: uploadOnly ? "arrow.up" : "arrow.down")
-                            .font(.system(size: compact ? 10 : 14, weight: .bold))
-                        Capsule()
-                            .fill(accent.opacity(0.18))
-                            .frame(width: compact ? 56 : 110, height: max(2, thickness))
-                            .overlay(alignment: .leading) {
-                                Capsule()
-                                    .fill(accent.opacity(0.95 * intensity))
-                                    .frame(width: (compact ? 56 : 110) * activity)
-                                    .animation(.easeOut(duration: 0.25), value: activity)
-                            }
-                        if showSpeed { Text(speed(currentSpeed)).monospacedDigit() }
-                    }
-                    .font(.system(size: compact ? 9 : 11, weight: .semibold, design: .rounded))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                case "Dual Rails":
-                    VStack(spacing: max(2, thickness)) {
-                        rail(value: monitor.downloadBytesPerSecond, threshold: thresholdMBps, color: .accentColor, width: proxy.size.width)
-                        rail(value: monitor.uploadBytesPerSecond, threshold: thresholdMBps, color: .orange, width: proxy.size.width)
-                    }
-                    .padding(.horizontal, compact ? 8 : 14)
-                    .frame(maxHeight: .infinity, alignment: .center)
-                    .overlay(alignment: .center) {
-                        if showSpeed {
-                            Text(speed(currentSpeed))
-                                .font(.system(size: compact ? 8 : 10, weight: .semibold, design: .monospaced))
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(.black.opacity(0.52), in: Capsule())
-                        }
-                    }
-
-                case "Minimal":
-                    HStack(spacing: 6) {
-                        Image(systemName: uploadOnly ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                            .foregroundStyle(accent)
-                        if showSpeed { Text(speed(currentSpeed)).monospacedDigit() }
-                    }
-                    .font(.system(size: compact ? 9 : 11, weight: .semibold, design: .rounded))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                default:
-                    VStack(spacing: 0) {
-                        Spacer()
-                        Capsule()
-                            .fill(.white.opacity(0.10))
-                            .frame(height: max(2, thickness))
-                            .overlay(alignment: .leading) {
-                                Capsule()
-                                    .fill(accent.opacity(0.95 * intensity))
-                                    .frame(width: max(8, proxy.size.width * activity), height: max(2, thickness))
-                                    .animation(.easeOut(duration: 0.25), value: activity)
-                            }
-                    }
-                    .overlay(alignment: .center) {
-                        HStack(spacing: 6) {
-                            Image(systemName: uploadOnly ? "arrow.up" : "arrow.down")
-                            if showSpeed { Text(speed(currentSpeed)).monospacedDigit() }
-                        }
-                        .font(.system(size: compact ? 9 : 11, weight: .semibold, design: .rounded))
-                    }
-                }
-            }
-        }
-    }
-
-    private func rail(value: Double, threshold: Double, color: Color, width: CGFloat) -> some View {
-        let floor = max(50_000, threshold * 1_000_000)
-        let fraction = min(1, max(0.05, value / (floor * 5)))
-        return Capsule()
-            .fill(color.opacity(0.12))
-            .frame(height: max(2, thickness))
-            .overlay(alignment: .leading) {
-                Capsule().fill(color.opacity(0.92 * intensity))
-                    .frame(width: max(5, width * fraction), height: max(2, thickness))
-                    .animation(.easeOut(duration: 0.25), value: fraction)
-            }
-    }
-
-    private func speed(_ value: Double) -> String {
-        if value >= 1_000_000_000 { return String(format: "%.1f GB/s", value / 1_000_000_000) }
-        if value >= 1_000_000 { return String(format: "%.1f MB/s", value / 1_000_000) }
-        if value >= 1_000 { return String(format: "%.0f KB/s", value / 1_000) }
-        return String(format: "%.0f B/s", value)
-    }
-}
-
-private enum TransferCISizing {
-    private static func bool(_ key: String, fallback: Bool, defaults: UserDefaults = .standard) -> Bool {
-        defaults.object(forKey: key) == nil ? fallback : defaults.bool(forKey: key)
-    }
-
-    private static func string(_ key: String, fallback: String, defaults: UserDefaults = .standard) -> String {
-        defaults.string(forKey: key) ?? fallback
-    }
-
-    private static func number(_ key: String, fallback: Double, defaults: UserDefaults = .standard) -> Double {
-        defaults.object(forKey: key) == nil ? fallback : defaults.double(forKey: key)
-    }
-
-    static func minimumExpandedWidth(physicalNotchWidth: CGFloat) -> CGFloat {
-        max(220, physicalNotchWidth > 0 ? physicalNotchWidth + 28 : 220)
-    }
-
-    static func openPreferredSize(stripHeight: CGFloat = 40, defaults: UserDefaults = .standard) -> CGSize {
-        let body = bodyPreferredSize(defaults: defaults)
-        return CGSize(width: body.width, height: body.height + max(40, stripHeight))
-    }
-
-    private static func bodyPreferredSize(defaults: UserDefaults) -> CGSize {
-        let openStyle = string("HaloContextTransferOpenStyle", fallback: "Dashboard", defaults: defaults)
-        let compact = bool("HaloContextTransferCompact", fallback: false, defaults: defaults)
-        let showDirection = bool("HaloContextTransferShowDirection", fallback: true, defaults: defaults)
-        let showDownload = bool("HaloContextTransferShowDownload", fallback: true, defaults: defaults)
-        let showUpload = bool("HaloContextTransferShowUpload", fallback: true, defaults: defaults)
-        let showPeak = bool("HaloContextTransferShowPeak", fallback: true, defaults: defaults)
-        let showSession = bool("HaloContextTransferShowSession", fallback: true, defaults: defaults)
-        let showElapsed = bool("HaloContextTransferShowElapsed", fallback: true, defaults: defaults)
-        let showGraph = bool("HaloContextTransferShowGraph", fallback: true, defaults: defaults)
-        let indicatorStyle = string("HaloContextTransferIndicatorStyle", fallback: "Edge Bar", defaults: defaults)
-        let indicatorShowSpeed = bool("HaloContextTransferIndicatorShowSpeed", fallback: true, defaults: defaults)
-        let indicatorThickness = number("HaloContextTransferIndicatorThickness", fallback: 3, defaults: defaults)
-
-        let primaryStats = (showDownload ? 1 : 0) + (showUpload ? 1 : 0)
-
-        switch openStyle {
-        case "Indicator":
-            let baseWidth: CGFloat
-            switch indicatorStyle {
-            case "Minimal": baseWidth = indicatorShowSpeed ? 270 : 230
-            case "Center Pulse": baseWidth = indicatorShowSpeed ? 360 : 290
-            case "Dual Rails": baseWidth = indicatorShowSpeed ? 390 : 315
-            default: baseWidth = indicatorShowSpeed ? 350 : 285
-            }
-            let hasMeta = showDirection || showElapsed
-            let extraThickness = CGFloat(max(0, indicatorThickness - 3))
-            return CGSize(width: baseWidth, height: max(CGFloat(96), CGFloat(70 + (hasMeta ? 26 : 8)) + extraThickness))
-
-        case "Minimal":
-            var width: CGFloat = 205
-            if showDirection { width += 105 }
-            width += CGFloat(primaryStats) * 105
-            if showElapsed { width += 62 }
-            return CGSize(width: min(600, max(260, width)), height: 96)
-
-        default:
-            let peakStats = (!compact && showPeak) ? 2 : 0
-            let stats = primaryStats + peakStats
-            var width: CGFloat = compact ? 300 : 330
-            if stats > 0 { width += CGFloat(stats) * (compact ? 76 : 88) }
-            if !showDirection && !showElapsed && stats == 0 { width = 280 }
-            width = min(720, max(280, width))
-
-            var height: CGFloat = compact ? 78 : 86
-            if stats > 0 { height += compact ? 58 : 66 }
-            if showGraph && !compact { height += 70 }
-            if showSession && !compact { height += 34 }
-            return CGSize(width: width, height: min(300, max(96, height)))
-        }
-    }
-
-    static func closedPreferredWidth(physicalNotchWidth: CGFloat, defaults: UserDefaults = .standard) -> CGFloat {
-        let closedStyle = string("HaloContextTransferClosedStyle", fallback: "Stats", defaults: defaults)
-        let showDirection = bool("HaloContextTransferShowDirection", fallback: true, defaults: defaults)
-        let showDownload = bool("HaloContextTransferShowDownload", fallback: true, defaults: defaults)
-        let showUpload = bool("HaloContextTransferShowUpload", fallback: true, defaults: defaults)
-        let indicatorStyle = string("HaloContextTransferIndicatorStyle", fallback: "Edge Bar", defaults: defaults)
-        let indicatorShowSpeed = bool("HaloContextTransferIndicatorShowSpeed", fallback: true, defaults: defaults)
-
-        let contentWidth: CGFloat
-        switch closedStyle {
-        case "Indicator":
-            switch indicatorStyle {
-            case "Minimal": contentWidth = indicatorShowSpeed ? 165 : 110
-            case "Center Pulse": contentWidth = indicatorShowSpeed ? 245 : 180
-            case "Dual Rails": contentWidth = indicatorShowSpeed ? 255 : 195
-            default: contentWidth = indicatorShowSpeed ? 235 : 175
-            }
-        case "Minimal":
-            contentWidth = 165
-        default:
-            var width: CGFloat = 48
-            if showDirection { width += 88 }
-            if showDownload { width += 96 }
-            if showUpload { width += 96 }
-            contentWidth = width
-        }
-
-        // The physical camera/notch is a hard lower bound on real notched Macs.
-        let physicalFloor = physicalNotchWidth > 0 ? physicalNotchWidth + 16 : 110
-        return min(520, max(physicalFloor, contentWidth))
-    }
-}
-
-private struct TransferContextView: View {
-    @ObservedObject var monitor: TransferActivityMonitor
-    @ObservedObject var surfaceState: SurfaceState
-    @AppStorage("HaloContextTransferOpenStyle") private var openStyle = "Dashboard"
-    @AppStorage("HaloContextTransferCompact") private var compact = false
-    @AppStorage("HaloContextTransferShowDirection") private var showDirection = true
-    @AppStorage("HaloContextTransferShowDownload") private var showDownload = true
-    @AppStorage("HaloContextTransferShowUpload") private var showUpload = true
-    @AppStorage("HaloContextTransferShowPeak") private var showPeak = true
-    @AppStorage("HaloContextTransferShowSession") private var showSession = true
-    @AppStorage("HaloContextTransferShowElapsed") private var showElapsed = true
-    @AppStorage("HaloContextTransferShowGraph") private var showGraph = true
-
-    private var elapsed: String {
-        guard let start = monitor.sessionStartedAt else { return "0:00" }
-        let seconds = max(0, Int(Date().timeIntervalSince(start)))
-        return String(format: "%d:%02d", seconds / 60, seconds % 60)
-    }
-
-    @AppStorage("HaloContextTransferIndicatorStyle") private var indicatorStyle = "Edge Bar"
-    @AppStorage("HaloContextTransferIndicatorShowSpeed") private var indicatorShowSpeed = true
-    @AppStorage("HaloContextTransferIndicatorThickness") private var indicatorThickness = 3.0
-
-    private var primaryStatCount: Int { (showDownload ? 1 : 0) + (showUpload ? 1 : 0) }
-    private var dashboardStatCount: Int { primaryStatCount + ((!compact && showPeak) ? 2 : 0) }
-    @State private var measuredContentHeight: CGFloat = 0
-    private var preferredSize: CGSize {
-        var size = TransferCISizing.openPreferredSize(stripHeight: surfaceState.compactHeight)
-        if measuredContentHeight > 0 {
-            size.height = measuredContentHeight + max(40, surfaceState.compactHeight)
-        }
-        return size
-    }
-    private var sizingSignature: String {
-        [openStyle, compact.description, showDirection.description, showDownload.description,
-         showUpload.description, showPeak.description, showSession.description,
-         showElapsed.description, showGraph.description, indicatorStyle,
-         indicatorShowSpeed.description, String(format: "%.2f", indicatorThickness)].joined(separator: "|")
-    }
-
-    var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-        Group {
-            if openStyle == "Indicator" {
-                VStack(spacing: 8) {
-                    TransferActivityIndicator(monitor: monitor, compact: false)
-                        .frame(height: 34)
-                    if showDirection || showElapsed {
-                        HStack {
-                            if showDirection { Text(monitor.direction).font(.caption.weight(.semibold)) }
-                            Spacer()
-                            if showElapsed { Label(elapsed, systemImage: "clock").font(.caption.monospacedDigit()) }
-                        }
-                        .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.horizontal, 16).padding(.vertical, 12)
-            } else if openStyle == "Minimal" {
-                HStack(spacing: 12) {
-                    Image(systemName: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading") ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                        .font(.system(size: 22, weight: .semibold)).foregroundStyle(Color.accentColor)
-                    if showDirection {
-                        Text(monitor.direction).font(.headline)
-                    }
-                    if showDownload { compactStat("↓", speed(monitor.downloadBytesPerSecond)) }
-                    if showUpload { compactStat("↑", speed(monitor.uploadBytesPerSecond)) }
-                    Spacer(minLength: 4)
-                    if showElapsed { Text(elapsed).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
-                }
-                .padding(.horizontal, 16).padding(.vertical, 13)
-            } else {
-                VStack(alignment: .leading, spacing: compact ? 9 : 14) {
-                    HStack(spacing: 10) {
-                        Image(systemName: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading") ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                            .font(.system(size: compact ? 18 : 23, weight: .semibold))
-                            .foregroundStyle(Color.accentColor)
-                        VStack(alignment: .leading, spacing: 2) {
-                            if showDirection { Text(monitor.direction).font(compact ? .headline : .title3.bold()) }
-                            Text("LIVE TRANSFER").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if showElapsed { Label(elapsed, systemImage: "clock").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
-                    }
-
-                    if dashboardStatCount > 0 {
-                        HStack(spacing: compact ? 10 : 14) {
-                            if showDownload { stat("Download", value: speed(monitor.downloadBytesPerSecond), symbol: "arrow.down") }
-                            if showUpload { stat("Upload", value: speed(monitor.uploadBytesPerSecond), symbol: "arrow.up") }
-                            if showPeak && !compact {
-                                stat("Peak ↓", value: speed(monitor.peakDownloadBytesPerSecond), symbol: "gauge")
-                                stat("Peak ↑", value: speed(monitor.peakUploadBytesPerSecond), symbol: "gauge")
-                            }
-                        }
-                    }
-
-                    if showGraph && !compact {
-                        TransferHistoryGraph(download: monitor.downloadHistory, upload: monitor.uploadHistory)
-                            .frame(height: 56).padding(.vertical, 2)
-                    }
-
-                    if showSession && !compact {
-                        HStack {
-                            Label("↓ \(bytes(monitor.sessionDownloadedBytes))", systemImage: "tray.and.arrow.down")
-                            Label("↑ \(bytes(monitor.sessionUploadedBytes))", systemImage: "tray.and.arrow.up")
-                            Spacer()
-                            Text("Session \(bytes(monitor.sessionDownloadedBytes + monitor.sessionUploadedBytes))")
-                        }
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(compact ? 14 : 18)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .fixedSize(horizontal: false, vertical: true)
-        .background {
-            GeometryReader { proxy in
-                Color.clear.preference(key: SurfaceContentSizeKey.self, value: proxy.size)
-            }
-        }
-        }
-        .onPreferenceChange(SurfaceContentSizeKey.self) { size in
-            guard surfaceState.expanded, abs(size.width - surfaceState.dashboardWidth) < 1,
-                  size.height > 0, abs(size.height - measuredContentHeight) >= 1 else { return }
-            measuredContentHeight = size.height
-            updateSizing()
-        }
-        .onAppear { updateSizing() }
-        .onChange(of: sizingSignature) { _ in updateSizing() }
-        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in updateSizing() }
-    }
-
-    private func updateSizing() {
-        surfaceState.contextMinimumExpandedWidth = TransferCISizing.minimumExpandedWidth(physicalNotchWidth: surfaceState.physicalNotchWidth)
-        surfaceState.contextPreferredSize = preferredSize
-        surfaceState.contextPreferredCompactWidth = TransferCISizing.closedPreferredWidth(physicalNotchWidth: surfaceState.physicalNotchWidth)
-    }
-
-    private func compactStat(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(title).font(.caption2).foregroundStyle(.secondary)
-            Text(value).font(.system(size: 12, weight: .semibold, design: .rounded)).monospacedDigit()
-        }
-    }
-
-    private func stat(_ title: String, value: String, symbol: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label(title, systemImage: symbol).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.system(size: compact ? 15 : 18, weight: .semibold, design: .rounded)).monospacedDigit()
-        }
-        .padding(.horizontal, compact ? 10 : 12).padding(.vertical, compact ? 7 : 9)
-        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func speed(_ value: Double) -> String {
-        if value >= 1_000_000_000 { return String(format: "%.2f GB/s", value / 1_000_000_000) }
-        if value >= 1_000_000 { return String(format: "%.1f MB/s", value / 1_000_000) }
-        if value >= 1_000 { return String(format: "%.0f KB/s", value / 1_000) }
-        return String(format: "%.0f B/s", value)
-    }
-
-    private func bytes(_ value: Double) -> String {
-        if value >= 1_000_000_000 { return String(format: "%.2f GB", value / 1_000_000_000) }
-        if value >= 1_000_000 { return String(format: "%.1f MB", value / 1_000_000) }
-        if value >= 1_000 { return String(format: "%.0f KB", value / 1_000) }
-        return String(format: "%.0f B", value)
-    }
-}
-
-private struct TransferClosedContextView: View {
-    @ObservedObject var monitor: TransferActivityMonitor
-    @ObservedObject var surfaceState: SurfaceState
-    @AppStorage("HaloContextTransferClosedStyle") private var closedStyle = "Stats"
-    @AppStorage("HaloContextTransferShowDirection") private var showDirection = true
-    @AppStorage("HaloContextTransferShowDownload") private var showDownload = true
-    @AppStorage("HaloContextTransferShowUpload") private var showUpload = true
-    @AppStorage("HaloContextTransferIndicatorStyle") private var indicatorStyle = "Edge Bar"
-    @AppStorage("HaloContextTransferIndicatorShowSpeed") private var indicatorShowSpeed = true
-
-    private var sizingSignature: String {
-        [closedStyle, showDirection.description, showDownload.description, showUpload.description,
-         indicatorStyle, indicatorShowSpeed.description].joined(separator: "|")
-    }
-
-    var body: some View {
-        Group {
-            if closedStyle == "Indicator" {
-                TransferActivityIndicator(monitor: monitor, compact: true)
-                    .padding(.horizontal, 5)
-            } else if closedStyle == "Minimal" {
-                HStack(spacing: 6) {
-                    Image(systemName: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading") ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.accentColor)
-                    Text(speed(max(monitor.downloadBytesPerSecond, monitor.uploadBytesPerSecond)))
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced)).lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                HStack(spacing: 8) {
-                    Image(systemName: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading") ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.accentColor)
-                    if showDirection {
-                        Text(shortDirection).font(.system(size: 10, weight: .semibold, design: .rounded)).lineLimit(1)
-                    }
-                    Spacer(minLength: 4)
-                    if showDownload {
-                        Label(speed(monitor.downloadBytesPerSecond), systemImage: "arrow.down")
-                            .font(.system(size: 9, weight: .medium, design: .monospaced)).lineLimit(1)
-                    }
-                    if showUpload {
-                        Label(speed(monitor.uploadBytesPerSecond), systemImage: "arrow.up")
-                            .font(.system(size: 9, weight: .medium, design: .monospaced)).lineLimit(1)
-                    }
-                }
-                .padding(.horizontal, 10)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .onAppear { updateSizing() }
-        .onChange(of: sizingSignature) { _ in updateSizing() }
-        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in updateSizing() }
-    }
-
-    private func updateSizing() {
-        surfaceState.contextMinimumExpandedWidth = TransferCISizing.minimumExpandedWidth(physicalNotchWidth: surfaceState.physicalNotchWidth)
-        surfaceState.contextPreferredCompactWidth = TransferCISizing.closedPreferredWidth(physicalNotchWidth: surfaceState.physicalNotchWidth)
-        // Prime the next open target while still closed, so opening goes directly to the
-        // correct content-driven size instead of opening large and resizing a frame later.
-        if !surfaceState.expanded {
-            surfaceState.contextPreferredSize = TransferCISizing.openPreferredSize(stripHeight: surfaceState.compactHeight)
-        }
-    }
-
-    private var shortDirection: String {
-        if monitor.direction.contains("Uploading + Downloading") { return "Transfer" }
-        if monitor.direction.contains("Uploading") { return "Uploading" }
-        if monitor.direction.contains("Downloading") { return "Downloading" }
-        return "Transfer"
-    }
-
-    private func speed(_ value: Double) -> String {
-        if value >= 1_000_000_000 { return String(format: "%.1fG/s", value / 1_000_000_000) }
-        if value >= 1_000_000 { return String(format: "%.1fM/s", value / 1_000_000) }
-        if value >= 1_000 { return String(format: "%.0fK/s", value / 1_000) }
-        return String(format: "%.0fB/s", value)
-    }
-}
-
-private struct TransferSurfaceBackground: View {
-    @ObservedObject var monitor: TransferActivityMonitor
-    @AppStorage("HaloContextTransferBackgroundStyle") private var style = "Gradient"
-    @AppStorage("HaloContextTransferBackgroundPrimaryHue") private var primaryHue = 0.58
-    @AppStorage("HaloContextTransferBackgroundSecondaryHue") private var secondaryHue = 0.72
-    @AppStorage("HaloContextTransferBackgroundSaturation") private var saturation = 0.72
-    @AppStorage("HaloContextTransferBackgroundBrightness") private var brightness = 0.30
-    @AppStorage("HaloContextTransferBackgroundOpacity") private var opacity = 1.0
-
-    var body: some View {
-        let primary = Color(hue: primaryHue, saturation: saturation, brightness: brightness)
-        let secondary = Color(hue: secondaryHue, saturation: saturation, brightness: min(1, brightness + 0.12))
-        switch style {
-        case "Black":
-            Color.black.opacity(opacity)
-        case "Accent":
-            Color.accentColor.opacity(opacity)
-        case "Dynamic":
-            LinearGradient(
-                colors: monitor.direction.contains("Uploading") && !monitor.direction.contains("Downloading")
-                    ? [Color.orange.opacity(opacity), primary.opacity(opacity)]
-                    : [Color.accentColor.opacity(opacity), secondary.opacity(opacity)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        case "Glass":
-            ZStack {
-                Rectangle().fill(.ultraThinMaterial)
-                primary.opacity(max(0, min(1, opacity * 0.36)))
-            }
-        default:
-            LinearGradient(
-                colors: [primary.opacity(opacity), secondary.opacity(opacity)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-    }
-}
 
 struct SurfaceViewportView: View {
     @ObservedObject var viewport: SurfaceViewport
@@ -2270,7 +1604,7 @@ private struct ClipboardContextView: View {
 }
 
 private enum ActiveContextInterface: String {
-    case drop, teleprompter, transfer, clipboard, custom, integration, music, bluetooth, retro, liveActivity
+    case drop, teleprompter, clipboard, custom, integration, music, bluetooth, retro, liveActivity
 }
 
 private struct SurfaceContextCandidate {
@@ -2756,7 +2090,6 @@ struct SurfaceView: View {
     @ObservedObject var state: SurfaceState
     @ObservedObject var workspace: WorkspaceStore
     @ObservedObject private var bluetooth = BluetoothStateService.shared
-    @ObservedObject private var transfer = TransferActivityMonitor.shared
     @ObservedObject private var clipboardCI = ClipboardContextMonitor.shared
     @ObservedObject private var customCI = HaloCustomCIRuntimeStore.shared
     @ObservedObject private var integrationCI = IntegrationCIRuntime.shared
@@ -2770,13 +2103,9 @@ struct SurfaceView: View {
     @State private var simpleAnimationToken = UUID()
     @AppStorage("HaloContextTeleprompterEnabled") private var teleprompterCIEnabled = true
     @AppStorage("HaloContextTeleprompterPriority") private var teleprompterPriority = 70.0
-    @AppStorage("HaloContextTransferEnabled") private var transferCIEnabled = true
-    @AppStorage("HaloContextTransferPriority") private var transferPriority = 65.0
     @AppStorage("HaloContextClipboardEnabled") private var clipboardCIEnabled = true
     @AppStorage("HaloContextClipboardPriority") private var clipboardPriority = 68.0
     @AppStorage("HaloDisableCustomCI") private var disableCustomCI = false
-    @AppStorage("HaloContextTransferUseFullNotchArea") private var transferUsesFullNotchArea = true
-    @AppStorage("HaloContextTransferKeepClosedNotchContents") private var transferKeepsClosedContents = false
     @AppStorage("HaloOpenKeepClosedNotchContents") private var keepClosedContentsWhenOpen = false
     @AppStorage("HaloContextMusicUseFullNotchArea") private var contextMusicUsesFullNotchArea = false
     @AppStorage("HaloContextMusicKeepClosedNotchContents") private var contextMusicKeepsClosedContents = false
@@ -2824,7 +2153,6 @@ struct SurfaceView: View {
         if dropCIEnabled && state.dropTargeted { candidates.append((.drop, dropPriority, 4)) }
         if retroCIEnabled && retroGameRequested { candidates.append((.retro, retroPriority, 4)) }
         if teleprompterCIEnabled && teleprompterActive { candidates.append((.teleprompter, teleprompterPriority, 3)) }
-        if transferCIEnabled && transfer.isActive { candidates.append((.transfer, transferPriority, 3)) }
         if clipboardCIEnabled && clipboardCI.isActive { candidates.append((.clipboard, clipboardCI.manualPresentation ? 1000 : clipboardPriority, 3)) }
         if liveActivityCandidate != nil { candidates.append((.liveActivity, liveActivitiesPriority, 3)) }
         if contextOptions.enabled && workspace.media.hasNowPlayingPresentation { candidates.append((.music, contextMusicPriority, 2)) }
@@ -2928,7 +2256,6 @@ struct SurfaceView: View {
     private var bluetoothContextActive: Bool { activeContext == .bluetooth }
     private var retroContextActive: Bool { activeContext == .retro }
     private var teleprompterContextActive: Bool { activeContext == .teleprompter }
-    private var transferContextActive: Bool { activeContext == .transfer }
     private var clipboardContextActive: Bool { activeContext == .clipboard }
     private var customContextActive: Bool { activeContext == .custom }
     private var integrationContextActive: Bool { activeContext == .integration }
@@ -2938,7 +2265,7 @@ struct SurfaceView: View {
     private var visuallyExpanded: Bool { state.expanded || state.presentationExpanded }
     private var reportsOpenedNotchVisible: Bool {
         visuallyExpanded &&
-        (activeContext == nil || transferContextActive || clipboardContextActive || customContextActive || integrationContextActive || liveActivityContextActive)
+        (activeContext == nil || clipboardContextActive || customContextActive || integrationContextActive || liveActivityContextActive)
     }
     private var contextOwnsFullSurface: Bool {
         guard visuallyExpanded else { return false }
@@ -2949,7 +2276,6 @@ struct SurfaceView: View {
         case .retro: return retroUsesFullNotchArea
         case .liveActivity: return liveActivitiesUseFullNotchArea
         case .teleprompter: return true
-        case .transfer: return false
         case .clipboard: return false
         case .custom: return true
         case .integration:
@@ -2967,7 +2293,6 @@ struct SurfaceView: View {
         case .retro: return retroKeepsClosedContents
         case .liveActivity: return liveActivitiesKeepClosedContents
         case .teleprompter: return false
-        case .transfer: return false
         case .clipboard: return false
         case .custom: return false
         case .integration:
@@ -3106,9 +2431,7 @@ struct SurfaceView: View {
                         Circle().fill(store.deadline == nil ? accent : .green).frame(width: 6, height: 6)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                       } else if !visuallyExpanded {
-                        if transferContextActive {
-                            TransferClosedContextView(monitor: transfer, surfaceState: state)
-                        } else if clipboardContextActive {
+                        if clipboardContextActive {
                             ClipboardClosedContextView(monitor: clipboardCI, surfaceState: state)
                         } else {
                             ClosedNotchView(store: store, workspace: workspace, layout: layout, occlusion: state.closedOcclusion, referenceWidth: state.compactWidth)
@@ -3157,10 +2480,6 @@ struct SurfaceView: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
                         }
-                    } else if transferContextActive {
-                        TransferContextView(monitor: transfer, surfaceState: state)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                            .transition(.opacity.combined(with: .scale(scale: 0.985)))
                     } else if clipboardContextActive {
                         ClipboardContextView(monitor: clipboardCI, surfaceState: state)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -3517,16 +2836,7 @@ struct SurfaceView: View {
             // Open-only state is torn down only after the physical retract finishes.
             // This prevents the panel from animating around an already-empty SwiftUI tree.
             state.contextPreferredSize = nil
-            if transferContextActive {
-                // Preserve the content-driven open target while Transfer remains active,
-                // so the next hover/click opens directly to the correct size.
-                DispatchQueue.main.async {
-                    guard transferContextActive, !state.expanded else { return }
-                    state.contextMinimumExpandedWidth = TransferCISizing.minimumExpandedWidth(physicalNotchWidth: state.physicalNotchWidth)
-                    state.contextPreferredCompactWidth = TransferCISizing.closedPreferredWidth(physicalNotchWidth: state.physicalNotchWidth)
-                    state.contextPreferredSize = TransferCISizing.openPreferredSize(stripHeight: state.compactHeight)
-                }
-            } else if clipboardContextActive {
+            if clipboardContextActive {
                 DispatchQueue.main.async {
                     guard clipboardContextActive, !state.expanded else { return }
                     state.contextMinimumExpandedWidth = ClipboardCISizing.minimumExpandedWidth(physicalNotchWidth: state.physicalNotchWidth)
@@ -3595,7 +2905,7 @@ struct SurfaceView: View {
                 clipboardCI.setInteractionActive(false)
                 if activeContext != nil { clipboardOpenedNotch = false }
             }
-            if !transferContextActive && !clipboardContextActive && !customContextActive && !integrationContextActive {
+            if !clipboardContextActive && !customContextActive && !integrationContextActive {
                 state.contextPreferredCompactWidth = nil
                 state.contextPreferredCompactHeight = nil
                 state.contextMinimumExpandedWidth = nil
@@ -3757,8 +3067,6 @@ struct SurfaceView: View {
         ZStack {
             if simpleMode {
                 workspace.settings.resolvedSimpleNotch.resolvedBackgroundColor.color
-            } else if transferContextActive {
-                TransferSurfaceBackground(monitor: transfer)
             } else if clipboardContextActive {
                 ClipboardSurfaceBackground(monitor: clipboardCI)
             } else if customContextActive, let candidate = activeCustomCandidate {
@@ -3783,7 +3091,6 @@ struct SurfaceView: View {
                 )
             }
             if !simpleMode &&
-                !transferContextActive &&
                 !clipboardContextActive &&
                 !customContextActive &&
                 !integrationContextActive &&

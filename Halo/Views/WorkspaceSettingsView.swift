@@ -695,7 +695,7 @@ struct SettingsView: View {
                 HaloFullLockedPage(
                     title: "Context Interfaces",
                     description: "Let Halo temporarily transform itself around what you're doing.",
-                    bullets: ["Drop, Music, Teleprompter and Clipboard CIs", "Transfer, Bluetooth, Live Activities and Retro Game CIs", "Custom CI SDK packages", "Third-party Halo Integrations"]
+                    bullets: ["Drop, Music, Teleprompter and Clipboard CIs", "Bluetooth, Live Activities and Retro Game CIs", "Custom CI SDK packages", "Third-party Halo Integrations"]
                 )
             }
         case "Media & Files":
@@ -3371,7 +3371,7 @@ private struct HaloContextInterfaceSearchField: NSViewRepresentable {
 }
 
 private enum ContextInterfaceSelection: String, CaseIterable, Identifiable {
-    case drop, music, teleprompter, transfer, clipboard, bluetooth, retro, liveActivity
+    case drop, music, teleprompter, clipboard, bluetooth, retro, liveActivity
     var id: String { rawValue }
 }
 
@@ -3435,7 +3435,6 @@ private struct ContextInterfaceLibraryView: View {
     @State private var ciSearchText = ""
     @AppStorage("HaloThirdPartyCISectionExpanded") private var thirdPartyExpanded = true
     @AppStorage("HaloContextDropEnabled") private var dropEnabled = true
-    @AppStorage("HaloContextTransferEnabled") private var transferEnabled = true
     @AppStorage("HaloContextClipboardEnabled") private var clipboardEnabled = true
     @AppStorage("HaloContextBluetoothEnabled") private var bluetoothEnabled = false
     @AppStorage("HaloContextRetroEnabled") private var retroEnabled = false
@@ -3529,15 +3528,6 @@ private struct ContextInterfaceLibraryView: View {
                 }
             }
             ClipboardContextSettings()
-        } else if selection == .transfer {
-            Section {
-                HStack(spacing: 12) {
-                    Button { withAnimation(.easeInOut(duration: 0.18)) { selection = nil } } label: { Label("All CI", systemImage: "chevron.left") }
-                    Spacer()
-                    Label("Transfer CI", systemImage: "arrow.up.arrow.down.circle.fill").font(.headline)
-                }
-            }
-            TransferContextSettings()
         } else if selection == .bluetooth {
             Section {
                 HStack(spacing: 12) {
@@ -3619,11 +3609,6 @@ private struct ContextInterfaceLibraryView: View {
                         if builtInMatchesSearch(.teleprompter) {
                             TeleprompterContextInterfaceCard {
                                 withAnimation(.easeInOut(duration: 0.18)) { selection = .teleprompter }
-                            }
-                        }
-                        if builtInMatchesSearch(.transfer) {
-                            TransferContextInterfaceCard(enabled: transferEnabled) {
-                                withAnimation(.easeInOut(duration: 0.18)) { selection = .transfer }
                             }
                         }
                         if builtInMatchesSearch(.clipboard) {
@@ -3759,8 +3744,6 @@ private struct ContextInterfaceLibraryView: View {
             searchableText = "Music CI Now Playing playback artwork controls lyrics visualizer audio"
         case .teleprompter:
             searchableText = "Teleprompter CI Creator Presentation scripts read record present camera"
-        case .transfer:
-            searchableText = "Transfer CI Downloads Uploads network transfer speed throughput"
         case .clipboard:
             searchableText = "Clipboard CI Copy Actions clipboard text links images files paste"
         case .bluetooth:
@@ -4190,7 +4173,7 @@ private struct ClipboardContextSettings: View {
                     Slider(value: $priority, in: 0...100, step: 1)
                     Text("\(Int(priority))").font(.caption.monospacedDigit()).frame(width: 36)
                 }
-                Text("Higher-priority Context Interfaces win when several contexts are active at once. Clipboard defaults just below Teleprompter and above Transfer.")
+                Text("Higher-priority Context Interfaces win when several contexts are active at once. Clipboard defaults just below Teleprompter.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -4275,173 +4258,6 @@ private struct ClipboardContextSettings: View {
                 Text("Clipboard CI only inspects a new pasteboard item while this CI is enabled. macOS concealed/transient clipboard types are ignored, excluded apps suppress the trigger, and Clipboard CI never persists clipboard contents or history to disk.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-        }
-    }
-}
-
-private struct TransferContextInterfaceCard: View {
-    let enabled: Bool
-    let action: () -> Void
-    @AppStorage("HaloContextTransferPriority") private var priority = 65.0
-    @State private var hovered = false
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous).fill(LinearGradient(colors: [Color.accentColor.opacity(0.30), Color.black.opacity(0.95)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    HStack(spacing: 18) {
-                        Image(systemName: "arrow.down.circle.fill").font(.system(size: 30, weight: .semibold))
-                        VStack(spacing: 5) { Capsule().fill(.white.opacity(0.85)).frame(width: 92, height: 6); Capsule().fill(.white.opacity(0.25)).frame(width: 68, height: 5) }
-                        Image(systemName: "arrow.up.circle.fill").font(.system(size: 30, weight: .semibold))
-                    }.foregroundStyle(.white)
-                }.frame(height: 112)
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 3) { Text("Transfer CI").font(.headline); Text("Downloads & Uploads").font(.caption).foregroundStyle(.secondary) }
-                    Spacer()
-                    Text(enabled ? "Enabled" : "Available").font(.caption2.weight(.semibold)).padding(.horizontal, 8).padding(.vertical, 4).background((enabled ? Color.green : Color.secondary).opacity(0.12), in: Capsule()).foregroundStyle(enabled ? Color.green : Color.secondary)
-                }
-                Text("Appears automatically during sustained network transfers with live speed, peaks, totals, elapsed time and throughput history.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.leading)
-                HStack { Label("Automatic", systemImage: "bolt.fill").font(.caption2).foregroundStyle(.secondary); Text("Priority \(Int(priority))").font(.caption2).foregroundStyle(.secondary); Spacer(); Label("Edit", systemImage: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor) }
-            }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(Color.primary.opacity(hovered ? 0.075 : 0.045), in: RoundedRectangle(cornerRadius: 16, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(hovered ? Color.accentColor.opacity(0.42) : Color.primary.opacity(0.08), lineWidth: 1)).contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }.buttonStyle(.plain).onHover { hovered = $0 }.animation(.easeOut(duration: 0.14), value: hovered)
-    }
-}
-
-private struct TransferContextSettings: View {
-    @AppStorage("HaloContextTransferEnabled") private var enabled = true
-    @AppStorage("HaloContextTransferPriority") private var priority = 65.0
-    @AppStorage("HaloContextTransferThresholdMBps") private var threshold = 0.35
-    @AppStorage("HaloContextTransferLingerSeconds") private var linger = 2.5
-    @AppStorage("HaloContextTransferReactDownloads") private var reactDownloads = true
-    @AppStorage("HaloContextTransferReactUploads") private var reactUploads = true
-    @AppStorage("HaloContextTransferClosedStyle") private var closedStyle = "Stats"
-    @AppStorage("HaloContextTransferOpenStyle") private var openStyle = "Dashboard"
-    @AppStorage("HaloContextTransferCompact") private var compact = false
-    @AppStorage("HaloContextTransferShowDirection") private var showDirection = true
-    @AppStorage("HaloContextTransferShowDownload") private var showDownload = true
-    @AppStorage("HaloContextTransferShowUpload") private var showUpload = true
-    @AppStorage("HaloContextTransferShowPeak") private var showPeak = true
-    @AppStorage("HaloContextTransferShowSession") private var showSession = true
-    @AppStorage("HaloContextTransferShowElapsed") private var showElapsed = true
-    @AppStorage("HaloContextTransferShowGraph") private var showGraph = true
-    @AppStorage("HaloContextTransferIndicatorStyle") private var indicatorStyle = "Edge Bar"
-    @AppStorage("HaloContextTransferIndicatorShowSpeed") private var indicatorShowSpeed = true
-    @AppStorage("HaloContextTransferIndicatorThickness") private var indicatorThickness = 3.0
-    @AppStorage("HaloContextTransferIndicatorIntensity") private var indicatorIntensity = 1.0
-    @AppStorage("HaloContextTransferBackgroundStyle") private var backgroundStyle = "Gradient"
-    @AppStorage("HaloContextTransferBackgroundPrimaryHue") private var backgroundPrimaryHue = 0.58
-    @AppStorage("HaloContextTransferBackgroundSecondaryHue") private var backgroundSecondaryHue = 0.72
-    @AppStorage("HaloContextTransferBackgroundSaturation") private var backgroundSaturation = 0.72
-    @AppStorage("HaloContextTransferBackgroundBrightness") private var backgroundBrightness = 0.30
-    @AppStorage("HaloContextTransferBackgroundOpacity") private var backgroundOpacity = 1.0
-
-    var body: some View {
-        Section("Transfer Context Interface") {
-            Toggle("Enable Transfer CI", isOn: $enabled)
-            Text("Transfer CI replaces the contents and styling of the existing Halo notch while transfer activity is present. It still opens, closes, hovers, pins and animates exactly like your normal notch.")
-                .font(.caption).foregroundStyle(.secondary)
-            Toggle("React to downloads", isOn: $reactDownloads)
-            Toggle("React to uploads", isOn: $reactUploads)
-        }
-
-        Section("Detection") {
-            LabeledContent("Activation threshold") {
-                Slider(value: $threshold, in: 0.05...10, step: 0.05)
-                Text(String(format: "%.2f MB/s", threshold)).font(.caption.monospacedDigit()).frame(width: 78)
-            }
-            LabeledContent("Stay visible after activity") {
-                Slider(value: $linger, in: 0...10, step: 0.5)
-                Text(String(format: "%.1f s", linger)).font(.caption.monospacedDigit()).frame(width: 54)
-            }
-            Text("Two sustained samples prevent tiny background requests from constantly taking over the notch. Linger smooths chunked transfers.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-
-        Section("Closed notch") {
-            Picker("Presentation", selection: $closedStyle) {
-                Text("Stats").tag("Stats")
-                Text("Download indicator").tag("Indicator")
-                Text("Minimal").tag("Minimal")
-            }.pickerStyle(.segmented)
-            Text(closedStyle == "Indicator" ? "Indicator mode turns the notch itself into a live transfer indicator, similar to Halo's update/download presentation. Because system-wide traffic does not expose universal file progress, the fill represents live transfer activity rather than a fake percentage." : "Choose how much transfer information should replace the normal closed-notch contents.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-
-        if closedStyle == "Indicator" || openStyle == "Indicator" {
-            Section("Indicator") {
-                Picker("Style", selection: $indicatorStyle) {
-                    Text("Edge Bar").tag("Edge Bar")
-                    Text("Center Pulse").tag("Center Pulse")
-                    Text("Dual Rails").tag("Dual Rails")
-                    Text("Minimal").tag("Minimal")
-                }
-                Toggle("Show live speed", isOn: $indicatorShowSpeed)
-                LabeledContent("Thickness") {
-                    Slider(value: $indicatorThickness, in: 1.5...10, step: 0.5)
-                    Text(String(format: "%.1f pt", indicatorThickness)).font(.caption.monospacedDigit()).frame(width: 48)
-                }
-                LabeledContent("Intensity") {
-                    Slider(value: $indicatorIntensity, in: 0.2...1, step: 0.05)
-                    Text("\(Int((indicatorIntensity * 100).rounded()))%").font(.caption.monospacedDigit()).frame(width: 42)
-                }
-            }
-        }
-
-        Section("Opened notch") {
-            Picker("Presentation", selection: $openStyle) {
-                Text("Dashboard").tag("Dashboard")
-                Text("Indicator").tag("Indicator")
-                Text("Minimal").tag("Minimal")
-            }.pickerStyle(.segmented)
-            if openStyle == "Dashboard" {
-                Toggle("Compact presentation", isOn: $compact)
-            }
-            Toggle("Show transfer direction", isOn: $showDirection)
-            Toggle("Show download speed", isOn: $showDownload).disabled(openStyle == "Indicator")
-            Toggle("Show upload speed", isOn: $showUpload).disabled(openStyle == "Indicator")
-            Toggle("Show peak speeds", isOn: $showPeak).disabled(compact || openStyle != "Dashboard")
-            Toggle("Show transferred this session", isOn: $showSession).disabled(compact || openStyle != "Dashboard")
-            Toggle("Show elapsed time", isOn: $showElapsed)
-            Toggle("Show live throughput graph", isOn: $showGraph).disabled(compact || openStyle != "Dashboard")
-            Text("Transfer CI now sizes itself from the content you enable. Removing graph, session totals, peaks or stat blocks shrinks the opened notch; enabling them grows it again.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-
-        Section("CI priority") {
-            Slider(value: $priority, in: 0...100, step: 1) { Text("Transfer CI priority") }
-            Text("Transfer defaults to priority 65: above Music and Bluetooth, below Teleprompter, Retro and Drop.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-
-        Section("Background") {
-            Picker("Style", selection: $backgroundStyle) {
-                Text("Gradient").tag("Gradient")
-                Text("Dynamic").tag("Dynamic")
-                Text("Accent").tag("Accent")
-                Text("Glass").tag("Glass")
-                Text("Black").tag("Black")
-            }
-            if backgroundStyle == "Gradient" || backgroundStyle == "Dynamic" || backgroundStyle == "Glass" {
-                LabeledContent("Primary hue") { Slider(value: $backgroundPrimaryHue, in: 0...1) }
-            }
-            if backgroundStyle == "Gradient" {
-                LabeledContent("Secondary hue") { Slider(value: $backgroundSecondaryHue, in: 0...1) }
-            }
-            if backgroundStyle == "Gradient" || backgroundStyle == "Dynamic" || backgroundStyle == "Glass" {
-                LabeledContent("Saturation") { Slider(value: $backgroundSaturation, in: 0...1) }
-                LabeledContent("Brightness") { Slider(value: $backgroundBrightness, in: 0.05...1) }
-            }
-            LabeledContent("Background opacity") {
-                Slider(value: $backgroundOpacity, in: 0.15...1)
-                Text("\(Int((backgroundOpacity * 100).rounded()))%").font(.caption.monospacedDigit()).frame(width: 42)
-            }
-            Text(backgroundStyle == "Dynamic" ? "Dynamic shifts toward download/accent or upload/orange colors based on the active direction." : "Transfer styling is isolated from your normal notch appearance.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-
-        Section("What Halo can detect") {
-            Text("System-wide transfer detection can report real throughput, direction, totals and peaks, but macOS does not expose a universal file progress percentage for every browser and app. Indicator mode therefore represents live transfer activity unless a future app-specific provider can supply real progress.")
-                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }
