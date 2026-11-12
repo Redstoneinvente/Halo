@@ -27,8 +27,19 @@ struct TouchpadNotchSettingsView: View {
                         Text(service.settings.minimumPressure == 0 ? "Any" : "\(Int(service.settings.minimumPressure * 100))%")
                             .monospacedDigit().frame(width: 48)
                     }
-                    LabeledContent("Reported pressure", value: service.pressure.map { "\(Int($0 * 100))%" } ?? "Not reported")
-                    Text("Pressure uses Force Touch stage 1 events when macOS provides them. If no pressure is reported, a nonzero threshold prevents activation. Use Any for touch-only activation.")
+                    ProgressView(value: service.pressure ?? 0)
+                        .tint((service.pressure ?? 0) >= service.settings.minimumPressure ? .green : .accentColor)
+                        .accessibilityLabel("Live touchpad pressure")
+                    LabeledContent("Live pressure", value: service.pressure.map { "\(Int($0 * 100))%" } ?? "No finger detected")
+                    HStack {
+                        Button(service.learningPressure ? "Learning…" : "Learn my pressure") { service.learnPressure() }
+                            .disabled(!service.inputAvailable || !service.settings.hasSpot || service.recording || service.learningPressure)
+                        if service.learningPressure {
+                            ProgressView(value: service.pressureLearningProgress).frame(width: 100)
+                            Button("Cancel") { service.cancelPressureLearning() }
+                        }
+                    }
+                    Text("Uses the saved touchpad’s force sensor, even outside Halo. Learn your preferred press, then fine-tune the threshold above. Readings are smoothed to reduce jitter. Use Any for touch-only activation. Trackpads without force readings cannot activate a nonzero threshold.")
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("Haptic feedback when saved, opened or closed", isOn: $service.settings.haptics)
                     Text("Haptics require a compatible Force Touch trackpad. The spot does not block normal pointer movement or clicks; multi-finger gestures do not activate it.")
@@ -37,7 +48,7 @@ struct TouchpadNotchSettingsView: View {
                 }
             }
         }
-        .onDisappear { service.cancelRecording() }
+        .onDisappear { service.cancelRecording(); service.cancelPressureLearning() }
     }
 
     private var spotControls: some View {

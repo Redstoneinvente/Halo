@@ -20,6 +20,8 @@ final class TouchpadNotchService: ObservableObject {
     @Published private(set) var liveX = 0.5
     @Published private(set) var liveY = 0.5
     @Published private(set) var pressure: Double?
+    @Published private(set) var learningPressure = false
+    @Published private(set) var pressureLearningProgress = 0.0
     var notchIsOpen: (() -> Bool)?
     var toggleNotch: (() -> Void)?
     private static let key = "HaloTouchpadNotch.v1"
@@ -27,9 +29,10 @@ final class TouchpadNotchService: ObservableObject {
     private var recognizer = TouchpadNotchRecognizer()
     private var subscriptions = Set<AnyCancellable>()
     private var observers: [NSObjectProtocol] = []
-    private var monitors: [Any] = []
-    private var selectedContactID: Int32?
-    private var lastFrameTime = 0.0
+    private var pressureFilter = TouchpadPressureFilter()
+    private var pressureLearner = TouchpadPressureLearner()
+    private var pressureTimeout: Task<Void, Never>?
+    private var lastPressurePresentation = 0.0
     private var touchingDevices = Set<UInt64>()
     private var spotRecorder = TouchpadSpotRecorder()
     private var recordingTimeout: Task<Void, Never>?
@@ -62,7 +65,7 @@ final class TouchpadNotchService: ObservableObject {
         input.stop()
         inputAvailable = false
         touchingDevices.removeAll()
-        removeMonitors()
+        cancelPressureLearning()
         subscriptions.removeAll()
         observers.forEach(NSWorkspace.shared.notificationCenter.removeObserver)
         observers.removeAll()
@@ -70,6 +73,7 @@ final class TouchpadNotchService: ObservableObject {
 
     func recordSpot() {
         guard settings.enabled, HaloRuntimeGate.shared.isReady, !asleep, inputAvailable else { return }
+        cancelPressureLearning()
         recording = true
         spotRecorder = TouchpadSpotRecorder(touchingDevices: touchingDevices)
         recognizer.reset()
@@ -96,10 +100,10 @@ final class TouchpadNotchService: ObservableObject {
         inputAvailable = false
         touchingDevices.removeAll()
         input.stop()
-        removeMonitors()
+        cancelPressureLearning()
         recognizer.reset()
+        pressureFilter.reset()
         pressure = nil
-        selectedContactID = nil
         guard settings.enabled, HaloRuntimeGate.shared.isReady, !asleep else {
             cancelRecording()
             status = settings.enabled ? "Touchpad monitoring is paused." : "Touchpad Notch is off."
@@ -111,20 +115,31 @@ final class TouchpadNotchService: ObservableObject {
             return
         }
         inputAvailable = true
-        let mask: NSEvent.EventTypeMask = [.pressure, .leftMouseUp, .rightMouseUp]
-        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] event in
-            Task { @MainActor in self?.receivePressure(event) }
-        }) { monitors.append(monitor) }
-        if let monitor = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
-            self?.receivePressure(event); return event
-        }) { monitors.append(monitor) }
         status = settings.hasSpot ? "Ready. Touch and hold your saved spot." : "Record a spot to get started."
     }
 
-    private func removeMonitors() { monitors.forEach(NSEvent.removeMonitor); monitors.removeAll() }
-    private func receivePressure(_ event: NSEvent) {
-        guard selectedContactID != nil else { pressure = nil; return }
-        pressure = event.type == .pressure && event.stage == 1 ? Double(event.pressure) : nil
+    func learnPressure() {
+        guard inputAvailable, settings.enabled, settings.hasSpot else { return }
+        cancelRecording()
+        learningPressure = true
+        pressureLearner = TouchpadPressureLearner(waitingForRelease: settings.deviceID.map(touchingDevices.contains) ?? false)
+        pressureLearningProgress = 0
+        recognizer.reset()
+        status = "Lift your finger, then hold your preferred pressure on the saved spot for one second."
+        pressureTimeout?.cancel()
+        pressureTimeout = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.cancelPressureLearning()
+            self.status = "No steady pressure captured. Press on the saved spot and try again."
+        }
+    }
+
+    func cancelPressureLearning() {
+        pressureTimeout?.cancel(); pressureTimeout = nil
+        learningPressure = false; pressureLearningProgress = 0
+        pressureLearner = TouchpadPressureLearner()
+        recognizer.reset()
     }
 
     private func frame(device: UInt64, contacts: [TouchpadNotchRecognizer.Contact], time: Double) {
@@ -148,11 +163,28 @@ final class TouchpadNotchService: ObservableObject {
             return
         }
         guard device == settings.deviceID else { return }
-        let nextContactID = contacts.count == 1 ? contacts.first?.id : nil
-        if nextContactID != selectedContactID || time - lastFrameTime > 0.25 { pressure = nil }
-        selectedContactID = nextContactID
-        lastFrameTime = time
-        let currentPressure = pressure
+        let contact = contacts.count == 1 ? contacts.first : nil
+        let currentPressure = pressureFilter.update(force: contact?.force, contact: contact?.id, time: time, reference: settings.pressureReference)
+        let presentPressure = currentPressure == nil || time - lastPressurePresentation >= 1.0 / 30
+        if presentPressure {
+            pressure = currentPressure
+            lastPressurePresentation = time
+        }
+        if learningPressure {
+            let inSpot = contact.map { hypot($0.x - settings.x, $0.y - settings.y) <= settings.radius } ?? false
+            if let learned = pressureLearner.update(force: inSpot ? contact?.force : nil, contact: inSpot ? contact?.id : nil, time: time) {
+                cancelPressureLearning()
+                settings.pressureReference = min(65535, learned / 0.8)
+                settings.minimumPressure = 0.8
+                pressureFilter.reset()
+                _ = recognizer.update(contacts: contacts + contacts, pressure: nil, timestamp: time, isOpen: false, settings: settings)
+                status = "Pressure saved. Lift your finger before trying it."
+                feedback()
+            } else if presentPressure {
+                pressureLearningProgress = pressureLearner.progress
+            }
+            return
+        }
         let ci = HaloCustomCIRuntimeStore.shared
         let isOpen = settings.destination == .notch ? (notchIsOpen?() ?? false) : ci.manualActivationID == Self.packageID
         guard recognizer.update(contacts: contacts, pressure: currentPressure, timestamp: time, isOpen: isOpen, settings: settings) else { return }

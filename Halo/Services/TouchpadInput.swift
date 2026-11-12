@@ -16,7 +16,7 @@ private struct MTContact {
     var handID: Int32
     var normalized: MTVector
     var size: Float
-    var unused1: Int32
+    var force: Float
     var angle: Float
     var majorAxis: Float
     var minorAxis: Float
@@ -32,7 +32,7 @@ private let touchpadFrameCallback: MTCallback = { device, data, count, _, _ in
     var contacts: [TouchpadNotchRecognizer.Contact] = []
     for index in 0..<Int(count) {
         guard let value = buffer?[index], (value.state == 3 || value.state == 4) else { continue }
-        contacts.append(.init(id: value.identifier, x: Double(value.normalized.position.x), y: Double(value.normalized.position.y)))
+        contacts.append(.init(id: value.identifier, x: Double(value.normalized.position.x), y: Double(value.normalized.position.y), force: Double(value.force)))
     }
     TouchpadInput.delivery.send(device: UInt(bitPattern: device), contacts: contacts)
     return 0
