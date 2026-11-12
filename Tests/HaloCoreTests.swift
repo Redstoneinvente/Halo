@@ -1755,3 +1755,257 @@ final class ListeningArtworkTests: XCTestCase {
         XCTAssertNil(removed)
     }
 }
+
+final class TouchpadNotchTests: XCTestCase {
+    private func config() -> TouchpadNotchSettings {
+        var value = TouchpadNotchSettings()
+        value.enabled = true; value.hasSpot = true; value.x = 0.5; value.y = 0.5
+        return value
+    }
+    private let finger = TouchpadNotchRecognizer.Contact(id: 1, x: 0.5, y: 0.5)
+
+    func testHoldFiresOnceUntilFullRelease() {
+        var recognizer = TouchpadNotchRecognizer()
+        let settings = config()
+        for tick in 0..<5 {
+            XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: Double(tick) / 10, isOpen: false, settings: settings))
+        }
+        XCTAssertTrue(recognizer.update(contacts: [finger], pressure: nil, timestamp: 0.5, isOpen: false, settings: settings))
+        XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: 1, isOpen: true, settings: settings))
+        XCTAssertFalse(recognizer.update(contacts: [], pressure: nil, timestamp: 1.1, isOpen: true, settings: settings))
+        for tick in 12...16 {
+            XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: Double(tick) / 10, isOpen: true, settings: settings))
+        }
+        XCTAssertTrue(recognizer.update(contacts: [finger], pressure: nil, timestamp: 1.8, isOpen: true, settings: settings))
+    }
+
+    func testLeavingSpotAndChangingFingerRestartHold() {
+        var recognizer = TouchpadNotchRecognizer()
+        var settings = config(); settings.openHold = 0.2
+        XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: 0, isOpen: false, settings: settings))
+        let outside = TouchpadNotchRecognizer.Contact(id: 1, x: 0.9, y: 0.9)
+        XCTAssertFalse(recognizer.update(contacts: [outside], pressure: nil, timestamp: 0.1, isOpen: false, settings: settings))
+        XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: 0.2, isOpen: false, settings: settings))
+        let other = TouchpadNotchRecognizer.Contact(id: 2, x: 0.5, y: 0.5)
+        XCTAssertFalse(recognizer.update(contacts: [other], pressure: nil, timestamp: 0.3, isOpen: false, settings: settings))
+        XCTAssertFalse(recognizer.update(contacts: [other], pressure: nil, timestamp: 0.4, isOpen: false, settings: settings))
+        XCTAssertTrue(recognizer.update(contacts: [other], pressure: nil, timestamp: 0.51, isOpen: false, settings: settings))
+    }
+
+    func testPressureFailsClosedAndMustRemainAboveThreshold() {
+        var recognizer = TouchpadNotchRecognizer()
+        var settings = config(); settings.minimumPressure = 0.5; settings.openHold = 0.2
+        for (time, force) in [(0.0, nil), (0.1, 0.4), (0.2, 0.8), (0.3, nil), (0.4, 0.8), (0.5, 0.8)] as [(Double, Double?)] {
+            XCTAssertFalse(recognizer.update(contacts: [finger], pressure: force, timestamp: time, isOpen: false, settings: settings))
+        }
+        XCTAssertTrue(recognizer.update(contacts: [finger], pressure: 0.8, timestamp: 0.61, isOpen: false, settings: settings))
+    }
+
+    func testMultiFingerGestureBlocksUntilAllFingersLift() {
+        var recognizer = TouchpadNotchRecognizer()
+        var settings = config(); settings.openHold = 0.1
+        XCTAssertFalse(recognizer.update(contacts: [finger, finger], pressure: nil, timestamp: 0, isOpen: false, settings: settings))
+        XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: 0.2, isOpen: false, settings: settings))
+        XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: 0.4, isOpen: false, settings: settings))
+        XCTAssertFalse(recognizer.update(contacts: [], pressure: nil, timestamp: 0.5, isOpen: false, settings: settings))
+        XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: 0.6, isOpen: false, settings: settings))
+        XCTAssertTrue(recognizer.update(contacts: [finger], pressure: nil, timestamp: 0.8, isOpen: false, settings: settings))
+    }
+
+    func testGapAndExternalSurfaceChangeRestartHold() {
+        var recognizer = TouchpadNotchRecognizer()
+        var settings = config(); settings.openHold = 0.2; settings.closeHold = 0.4
+        XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: 0, isOpen: false, settings: settings))
+        XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: 1, isOpen: false, settings: settings))
+        XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: 1.1, isOpen: true, settings: settings))
+        for time in [1.2, 1.3, 1.4] {
+            XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: time, isOpen: true, settings: settings))
+        }
+        XCTAssertTrue(recognizer.update(contacts: [finger], pressure: nil, timestamp: 1.6, isOpen: true, settings: settings))
+    }
+
+    func testDisabledUnrecordedAndInvalidCoordinatesCannotActivate() {
+        for settings in [TouchpadNotchSettings(), config()] {
+            var recognizer = TouchpadNotchRecognizer()
+            let invalid = TouchpadNotchRecognizer.Contact(id: 1, x: .nan, y: 0.5)
+            XCTAssertFalse(recognizer.update(contacts: [invalid], pressure: 1, timestamp: 0, isOpen: false, settings: settings))
+            XCTAssertFalse(recognizer.update(contacts: [invalid], pressure: 1, timestamp: 2, isOpen: false, settings: settings))
+        }
+    }
+
+    func testDisabledAndUnrecordedSettingsRejectValidHold() {
+        var disabled = config(); disabled.enabled = false
+        var unrecorded = config(); unrecorded.hasSpot = false
+        for settings in [disabled, unrecorded] {
+            var recognizer = TouchpadNotchRecognizer()
+            for tick in 0...10 {
+                XCTAssertFalse(recognizer.update(contacts: [finger], pressure: 1, timestamp: Double(tick) / 10, isOpen: false, settings: settings))
+            }
+        }
+    }
+
+    func testSettingsRoundTripAndNormalize() throws {
+        var settings = config()
+        settings.deviceID = 123; settings.destination = .touchpadCI
+        let data = try JSONEncoder().encode(settings)
+        XCTAssertEqual(try JSONDecoder().decode(TouchpadNotchSettings.self, from: data), settings)
+        settings.x = .infinity; settings.radius = -1; settings.openHold = .nan; settings.minimumPressure = 10
+        let safe = settings.normalized()
+        XCTAssertEqual(safe.x, 0.5); XCTAssertEqual(safe.radius, 0.02)
+        XCTAssertEqual(safe.openHold, 0.5); XCTAssertEqual(safe.minimumPressure, 1)
+    }
+
+    func testBundledTouchpadPackageUsesExistingSDK() throws {
+#if SWIFT_PACKAGE
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Halo/Resources/Touchpad.haloCI")
+#else
+        let root = try XCTUnwrap(Bundle.main.url(forResource: "Touchpad", withExtension: "haloCI"))
+#endif
+        let report = HaloCIPackageValidator.validatePackage(at: root)
+        XCTAssertTrue(report.isValid, report.issues.map(\.message).joined(separator: " | "))
+        XCTAssertEqual(report.package?.manifest.id, "com.halo.touchpad")
+    }
+}
+
+final class TouchpadRecordingTests: XCTestCase {
+    private let finger = TouchpadNotchRecognizer.Contact(id: 1, x: 0.4, y: 0.7)
+
+    func testAppleInternalAndMagicTrackpadsAreRecognized() {
+        XCTAssertTrue(TouchpadDeviceClassifier.isTrackpad(product: "Apple Internal Keyboard / Trackpad"))
+        XCTAssertTrue(TouchpadDeviceClassifier.isTrackpad(product: "Magic Trackpad 2"))
+        XCTAssertTrue(TouchpadDeviceClassifier.isTrackpad(product: "USB Touchpad"))
+        XCTAssertFalse(TouchpadDeviceClassifier.isTrackpad(product: "Magic Mouse"))
+        XCTAssertFalse(TouchpadDeviceClassifier.isTrackpad(product: "Touch Bar"))
+    }
+
+    func testRecordingAlreadyIdleDoesNotRequireAnEmptyFrame() {
+        var recorder = TouchpadSpotRecorder()
+        for tick in 0..<10 {
+            XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: Double(tick) / 10))
+        }
+        XCTAssertEqual(recorder.update(device: 7, contacts: [finger], time: 1), .init(device: 7, x: 0.4, y: 0.7))
+    }
+
+    func testFingerUsedToClickRecordMustLiftBeforeCapture() {
+        var recorder = TouchpadSpotRecorder(touchingDevices: [7])
+        for tick in 0...12 {
+            XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: Double(tick) / 10))
+        }
+        XCTAssertNil(recorder.update(device: 7, contacts: [], time: 1.3))
+        for tick in 14..<24 {
+            XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: Double(tick) / 10))
+        }
+        XCTAssertNotNil(recorder.update(device: 7, contacts: [finger], time: 2.5))
+    }
+
+    func testIdleSecondDeviceCannotInterruptRecording() {
+        var recorder = TouchpadSpotRecorder()
+        for tick in 0..<10 {
+            XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: Double(tick) / 10))
+            XCTAssertNil(recorder.update(device: 8, contacts: [], time: Double(tick) / 10))
+        }
+        XCTAssertNotNil(recorder.update(device: 7, contacts: [finger], time: 1))
+    }
+
+    func testMissingFramesCannotFinishRecording() {
+        var recorder = TouchpadSpotRecorder()
+        XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: 0))
+        XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: 2))
+        XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: 2.1))
+    }
+
+    func testMovingOrAddingFingerRestartsRecording() {
+        var recorder = TouchpadSpotRecorder()
+        for tick in 0..<9 {
+            XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: Double(tick) / 10))
+        }
+        let moved = TouchpadNotchRecognizer.Contact(id: 1, x: 0.7, y: 0.7)
+        XCTAssertNil(recorder.update(device: 7, contacts: [moved], time: 0.9))
+        XCTAssertNil(recorder.update(device: 7, contacts: [moved, finger], time: 1))
+        XCTAssertNil(recorder.update(device: 7, contacts: [moved], time: 1.1))
+    }
+}
+
+final class TouchpadPressureTests: XCTestCase {
+    func testForceUsesCalibratedReferenceAndClamps() {
+        var filter = TouchpadPressureFilter()
+        XCTAssertEqual(filter.update(force: 50, contact: 1, time: 0, reference: 100), 0.5)
+        filter.reset()
+        XCTAssertEqual(filter.update(force: 500, contact: 1, time: 0, reference: 100), 1)
+        filter.reset()
+        XCTAssertEqual(filter.update(force: 127.5, contact: 1, time: 0, reference: nil), 0.5)
+    }
+
+    func testForceSmoothsJitterAndReleasesImmediatelyAtZero() {
+        var filter = TouchpadPressureFilter()
+        _ = filter.update(force: 50, contact: 1, time: 0, reference: 100)
+        let reading = filter.update(force: 100, contact: 1, time: 0.01, reference: 100)!
+        XCTAssertGreaterThan(reading, 0.5); XCTAssertLessThan(reading, 1)
+        XCTAssertEqual(filter.update(force: 0, contact: 1, time: 0.02, reference: 100), 0)
+    }
+
+    func testMissingInvalidAndNewContactCannotReuseForce() {
+        var filter = TouchpadPressureFilter()
+        _ = filter.update(force: 100, contact: 1, time: 0, reference: 100)
+        XCTAssertNil(filter.update(force: nil, contact: 1, time: 0.01, reference: 100))
+        XCTAssertNil(filter.update(force: .nan, contact: 1, time: 0.02, reference: 100))
+        XCTAssertNil(filter.update(force: -1, contact: 1, time: 0.03, reference: 100))
+        XCTAssertEqual(filter.update(force: 10, contact: 2, time: 0.04, reference: 100), 0.1)
+    }
+
+    func testLearnedPressureRequiresThreeSecondsOfSteadyPressure() {
+        var learner = TouchpadPressureLearner()
+        for tick in 0..<60 {
+            XCTAssertNil(learner.update(force: 40, contact: 1, time: Double(tick) / 20))
+        }
+        XCTAssertEqual(learner.update(force: 40, contact: 1, time: 3), 40)
+    }
+
+    func testChangingFirmnessRestartsThreeSecondHold() {
+        var learner = TouchpadPressureLearner()
+        for tick in 0..<40 {
+            XCTAssertNil(learner.update(force: 40, contact: 1, time: Double(tick) / 20))
+        }
+        XCTAssertNil(learner.update(force: 80, contact: 1, time: 2))
+        XCTAssertEqual(learner.progress, 0)
+        for tick in 41..<100 {
+            XCTAssertNil(learner.update(force: 80, contact: 1, time: Double(tick) / 20))
+        }
+        XCTAssertEqual(learner.update(force: 80, contact: 1, time: 5), 80)
+    }
+
+    func testPressureLearningWaitsForReleaseAndResetsAfterLostInput() {
+        var learner = TouchpadPressureLearner(waitingForRelease: true)
+        XCTAssertNil(learner.update(force: 40, contact: 1, time: 0))
+        XCTAssertNil(learner.update(force: 40, contact: 1, time: 2))
+        XCTAssertNil(learner.update(force: nil, contact: nil, time: 2.1))
+        XCTAssertNil(learner.update(force: 40, contact: 1, time: 2.2))
+        XCTAssertNil(learner.update(force: 40, contact: 1, time: 4))
+        XCTAssertEqual(learner.progress, 0)
+        XCTAssertNil(learner.update(force: nil, contact: nil, time: 4.1))
+    }
+
+    func testPressureHysteresisDoesNotStartBelowThreshold() {
+        var settings = TouchpadNotchSettings()
+        settings.enabled = true; settings.hasSpot = true
+        settings.minimumPressure = 0.5; settings.openHold = 0.2
+        let finger = TouchpadNotchRecognizer.Contact(id: 1, x: settings.x, y: settings.y)
+        var recognizer = TouchpadNotchRecognizer()
+        for tick in 0...5 {
+            XCTAssertFalse(recognizer.update(contacts: [finger], pressure: 0.48, timestamp: Double(tick) / 10, isOpen: false, settings: settings))
+        }
+        XCTAssertFalse(recognizer.update(contacts: [finger], pressure: 0.51, timestamp: 0.6, isOpen: false, settings: settings))
+        XCTAssertFalse(recognizer.update(contacts: [finger], pressure: 0.49, timestamp: 0.7, isOpen: false, settings: settings))
+        XCTAssertTrue(recognizer.update(contacts: [finger], pressure: 0.49, timestamp: 0.81, isOpen: false, settings: settings))
+    }
+
+    func testExistingSettingsWithoutPressureReferenceStillDecode() throws {
+        let encoded = try JSONEncoder().encode(TouchpadNotchSettings())
+        var json = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        json.removeValue(forKey: "pressureReference")
+        let decoded = try JSONDecoder().decode(TouchpadNotchSettings.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(decoded.pressureReference)
+        XCTAssertEqual(decoded.minimumPressure, 0)
+    }
+}

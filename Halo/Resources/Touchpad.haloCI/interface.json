@@ -1,0 +1,84 @@
+{
+  "closed": {
+    "type": "HStack",
+    "padding": 8,
+    "spacing": 8,
+    "children": [
+      {
+        "type": "Icon",
+        "systemName": "hand.point.up.fill"
+      },
+      {
+        "type": "Text",
+        "text": "Touchpad CI",
+        "lineLimit": 1
+      }
+    ]
+  },
+  "expanded": {
+    "type": "NotchContainer",
+    "padding": 18,
+    "spacing": 12,
+    "children": [
+      {
+        "type": "Text",
+        "text": "TOUCHPAD CI",
+        "style": "caption",
+        "foreground": "accent"
+      },
+      {
+        "type": "Text",
+        "text": "{{ media.title }}",
+        "style": "headline",
+        "lineLimit": 1
+      },
+      {
+        "type": "Text",
+        "text": "{{ media.artist }}",
+        "foreground": "secondary",
+        "lineLimit": 1
+      },
+      {
+        "type": "HStack",
+        "spacing": 16,
+        "children": [
+          {
+            "type": "Button",
+            "text": "Previous",
+            "systemName": "backward.fill",
+            "accessibilityLabel": "Previous",
+            "action": {
+              "id": "media.previous"
+            }
+          },
+          {
+            "type": "Button",
+            "text": "Play / Pause",
+            "systemName": "playpause.fill",
+            "accessibilityLabel": "Play / Pause",
+            "action": {
+              "id": "media.playPause"
+            }
+          },
+          {
+            "type": "Button",
+            "text": "Next",
+            "systemName": "forward.fill",
+            "accessibilityLabel": "Next",
+            "action": {
+              "id": "media.next"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Button",
+        "text": "Close",
+        "accessibilityLabel": "Close Touchpad CI",
+        "action": {
+          "id": "halo.ci.close"
+        }
+      }
+    ]
+  }
+}
