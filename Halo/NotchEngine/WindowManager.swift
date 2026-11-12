@@ -2792,6 +2792,22 @@ final class WindowManager {
         return expanded
     }
 
+    /// Use only the existing surface under the pointer, falling back to Halo's main host.
+    private var touchpadHost: Host? {
+        if let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }),
+           let host = hosts[Self.displayID(screen)] { return host }
+        return reviewPromptTargetHostID().flatMap { hosts[$0] }
+    }
+
+    var touchpadNotchIsOpen: Bool { touchpadHost?.state.expanded ?? false }
+
+    func toggleTouchpadNotch() {
+        guard let host = touchpadHost else { return }
+        host.state.collapseTask?.cancel()
+        host.state.hoverExpandTask?.cancel()
+        host.state.expanded.toggle()
+    }
+
     func toggleAll() {
         let expand = !hosts.values.contains { $0.state.expanded }
         hosts.values.forEach { $0.state.collapseTask?.cancel(); $0.state.expanded = expand }

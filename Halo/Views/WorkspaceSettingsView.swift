@@ -44,7 +44,7 @@ struct SettingsView: View {
         if HaloDistribution.current.supportsExternalLicensing || HaloDistribution.current.supportsAppStoreLicensing {
             coreItems.append("Account & License")
         }
-        coreItems.append("Privacy")
+        coreItems.append(contentsOf: ["Touchpad Notch", "Privacy"])
 
         var designItems = ["Appearance", "Closed notch", "Notch Bubbles", "Notch Skins", "Notch Ambient", "Activation Sequence"]
         if HaloDistribution.current.supportsSparkle {
@@ -419,6 +419,7 @@ struct SettingsView: View {
 
     private func sectionIcon(_ name: String) -> String {
         switch name {
+        case "Touchpad Notch": return "hand.point.up"
         case "General": return "gearshape"
         case "Notch Mode": return "rectangle.topthird.inset.filled"
         case "Account & License": return "person.crop.circle.badge.checkmark"
@@ -449,6 +450,8 @@ struct SettingsView: View {
     }
     @ViewBuilder private var content: some View {
         switch section ?? "General" {
+        case "Touchpad Notch":
+            TouchpadNotchSettingsView()
         case "General":
             Section("Welcome to Halo") {
                 Text("Your workspace, within reach.").font(.title2.bold())

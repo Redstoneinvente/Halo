@@ -91,6 +91,11 @@
 		FBAC00000000000000000001 /* Services/HaloFeedbackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */; };
 		FBAC00000000000000000002 /* Views/HaloFeedbackCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */; };
 		FBAC00000000000000000301 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = FBAC00000000000000000300 /* GoogleService-Info.plist */; };
+		A0C400000000000000000001 /* Core/TouchpadNotch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0C400000000000000000101 /* Core/TouchpadNotch.swift */; };
+		A0C400000000000000000002 /* Services/TouchpadInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0C400000000000000000102 /* Services/TouchpadInput.swift */; };
+		A0C400000000000000000003 /* Services/TouchpadNotchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0C400000000000000000103 /* Services/TouchpadNotchService.swift */; };
+		A0C400000000000000000004 /* Views/TouchpadNotchSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0C400000000000000000104 /* Views/TouchpadNotchSettingsView.swift */; };
+		A0C400000000000000000005 /* Touchpad.haloCI in Resources */ = {isa = PBXBuildFile; fileRef = A0C400000000000000000105; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -237,6 +242,11 @@
 		FBAC00000000000000000101 /* Services/HaloFeedbackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HaloFeedbackService.swift; sourceTree = "<group>"; };
 		FBAC00000000000000000102 /* Views/HaloFeedbackCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HaloFeedbackCenterView.swift; sourceTree = "<group>"; };
 		FBAC00000000000000000300 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		A0C400000000000000000101 /* Core/TouchpadNotch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/TouchpadNotch.swift; sourceTree = "<group>"; };
+		A0C400000000000000000102 /* Services/TouchpadInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/TouchpadInput.swift; sourceTree = "<group>"; };
+		A0C400000000000000000103 /* Services/TouchpadNotchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/TouchpadNotchService.swift; sourceTree = "<group>"; };
+		A0C400000000000000000104 /* Views/TouchpadNotchSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/TouchpadNotchSettingsView.swift; sourceTree = "<group>"; };
+		A0C400000000000000000105 /* Touchpad.haloCI */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/Touchpad.haloCI; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -352,6 +362,11 @@
 				C1A300000000000000000109 /* Core/IntegrationCIRuntime.swift */,
 				C1A30000000000000000010A /* Core/CIKeyboardShortcut.swift */,
 				C1A30000000000000000010B /* Services/IntegrationShortcuts.swift */,
+				A0C400000000000000000105 /* Touchpad.haloCI */,
+				A0C400000000000000000104 /* Views/TouchpadNotchSettingsView.swift */,
+				A0C400000000000000000103 /* Services/TouchpadNotchService.swift */,
+				A0C400000000000000000102 /* Services/TouchpadInput.swift */,
+				A0C400000000000000000101 /* Core/TouchpadNotch.swift */,
 				C1A30000000000000000010C /* Core/IntegrationActionDropTargetRegistry.swift */,
 				F8614B60305322E600D4943C /* AppIcon 2.icns */,
 			);
@@ -565,6 +580,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A0C400000000000000000005 /* Touchpad.haloCI in Resources */,
 				F84A0AB13055599200E8B51E /* Halo/Halo Icons/Pets/halo-pets-v2 in Resources */,
 				F8614B693053262D00D4943C /* Assets.xcassets in Resources */,
 				F8614B61305322E600D4943C /* AppIcon 2.icns in Resources */,
@@ -702,6 +718,10 @@
 				C1A300000000000000000009 /* Core/IntegrationCIRuntime.swift in Sources */,
 				C1A30000000000000000000A /* Core/CIKeyboardShortcut.swift in Sources */,
 				C1A30000000000000000000B /* Services/IntegrationShortcuts.swift in Sources */,
+				A0C400000000000000000004 /* Views/TouchpadNotchSettingsView.swift in Sources */,
+				A0C400000000000000000003 /* Services/TouchpadNotchService.swift in Sources */,
+				A0C400000000000000000002 /* Services/TouchpadInput.swift in Sources */,
+				A0C400000000000000000001 /* Core/TouchpadNotch.swift in Sources */,
 				C1A30000000000000000000C /* Core/IntegrationActionDropTargetRegistry.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

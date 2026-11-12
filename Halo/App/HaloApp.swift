@@ -86,6 +86,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(openSettings), name: Notification.Name("HaloOpenSettings"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(toggle), name: Notification.Name("HaloToggle"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(presentUpgrade), name: .haloPresentUpgrade, object: nil)
+        let touchpad = TouchpadNotchService.shared
+        touchpad.notchIsOpen = { [weak self] in self?.engine?.touchpadNotchIsOpen ?? false }
+        touchpad.toggleNotch = { [weak self] in self?.engine?.toggleTouchpadNotch() }
+        touchpad.start()
         configureCommercialAccessGate()
 
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -591,6 +595,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        TouchpadNotchService.shared.stop()
         HaloRuntimeGate.shared.setReady(false)
         ActivationSequenceCoordinator.shared.markQuit()
         appStoreLicensing.stop()

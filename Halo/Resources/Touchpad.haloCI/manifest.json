@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "sdkVersion": "0.1",
+  "id": "com.halo.touchpad",
+  "name": "Touchpad CI",
+  "author": "Halo",
+  "version": "1.0.0",
+  "minimumHaloVersion": "1.0.0",
+  "entryInterface": "interface.json",
+  "description": "Media controls within reach of your touchpad spot.",
+  "permissions": [
+    "Media.ReadState",
+    "Media.Control"
+  ],
+  "capabilities": [
+    "MediaControls"
+  ],
+  "supportedSurfaces": [
+    "notch"
+  ],
+  "supportedStates": [
+    "closed",
+    "expanded"
+  ],
+  "surface": {
+    "sizing": {
+      "mode": "static",
+      "closed": {
+        "width": 250,
+        "height": 40
+      },
+      "expanded": {
+        "width": 440,
+        "height": 220
+      }
+    },
+    "background": {
+      "closed": {
+        "type": "solid",
+        "color": "#10141C",
+        "opacity": 1
+      },
+      "expanded": {
+        "type": "gradient",
+        "color": "#10141C",
+        "secondaryColor": "#202D42",
+        "opacity": 1
+      }
+    }
+  }
+}
