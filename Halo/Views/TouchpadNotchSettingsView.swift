@@ -32,16 +32,18 @@ struct TouchpadNotchSettingsView: View {
                         .accessibilityLabel("Live touchpad pressure")
                     LabeledContent("Live pressure", value: service.pressure.map { "\(Int($0 * 100))%" } ?? "No finger detected")
                     HStack {
-                        Button(service.learningPressure ? "Learning…" : "Learn my pressure") { service.learnPressure() }
+                        Button(service.learningPressure ? "Recording pressure…" : "Record pressure") { service.learnPressure() }
                             .disabled(!service.inputAvailable || !service.settings.hasSpot || service.recording || service.learningPressure)
                         if service.learningPressure {
                             ProgressView(value: service.pressureLearningProgress).frame(width: 100)
+                            Text(String(format: "Hold steady · %.1f s", max(0, TouchpadPressureLearner.holdDuration * (1 - service.pressureLearningProgress))))
+                                .font(.caption).monospacedDigit()
                             Button("Cancel") { service.cancelPressureLearning() }
                         }
                     }
-                    Text("Uses the saved touchpad’s force sensor, even outside Halo. Learn your preferred press, then fine-tune the threshold above. Readings are smoothed to reduce jitter. Use Any for touch-only activation. Trackpads without force readings cannot activate a nonzero threshold.")
+                    Text("Uses the saved touchpad’s force sensor, even outside Halo. Click Record pressure, press the saved spot at your preferred firmness, then hold steady for three seconds. Two haptic taps confirm it is saved. Changing pressure or lifting restarts the hold. Fine-tune the threshold above. Readings are smoothed to reduce jitter. Use Any for touch-only activation. Trackpads without force readings cannot activate a nonzero threshold.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Toggle("Haptic feedback when saved, opened or closed", isOn: $service.settings.haptics)
+                    Toggle("Haptic feedback when spot is saved, opened or closed", isOn: $service.settings.haptics)
                     Text("Haptics require a compatible Force Touch trackpad. The spot does not block normal pointer movement or clicks; multi-finger gestures do not activate it.")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("Retry touchpad connection") { service.sync() }

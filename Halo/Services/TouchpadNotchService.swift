@@ -125,7 +125,7 @@ final class TouchpadNotchService: ObservableObject {
         pressureLearner = TouchpadPressureLearner(waitingForRelease: settings.deviceID.map(touchingDevices.contains) ?? false)
         pressureLearningProgress = 0
         recognizer.reset()
-        status = "Lift your finger, then hold your preferred pressure on the saved spot for one second."
+        status = "Lift your finger, press the saved spot at your preferred firmness, and hold steady for three seconds until you feel two taps."
         pressureTimeout?.cancel()
         pressureTimeout = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 15_000_000_000)
@@ -178,8 +178,8 @@ final class TouchpadNotchService: ObservableObject {
                 settings.minimumPressure = 0.8
                 pressureFilter.reset()
                 _ = recognizer.update(contacts: contacts + contacts, pressure: nil, timestamp: time, isOpen: false, settings: settings)
-                status = "Pressure saved. Lift your finger before trying it."
-                feedback()
+                status = "Pressure recorded. Lift your finger before trying it."
+                HaloHoverHaptics.pulse(id: "touchpad.pressureRecorded", strength: 3, pattern: .doubleTap)
             } else if presentPressure {
                 pressureLearningProgress = pressureLearner.progress
             }

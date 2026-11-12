@@ -1954,12 +1954,25 @@ final class TouchpadPressureTests: XCTestCase {
         XCTAssertEqual(filter.update(force: 10, contact: 2, time: 0.04, reference: 100), 0.1)
     }
 
-    func testLearnedPressureRequiresContinuousSamplesAndIgnoresSpike() {
+    func testLearnedPressureRequiresThreeSecondsOfSteadyPressure() {
         var learner = TouchpadPressureLearner()
-        for tick in 0..<20 {
-            XCTAssertNil(learner.update(force: tick == 10 ? 500 : 40, contact: 1, time: Double(tick) / 20))
+        for tick in 0..<60 {
+            XCTAssertNil(learner.update(force: 40, contact: 1, time: Double(tick) / 20))
         }
-        XCTAssertEqual(learner.update(force: 40, contact: 1, time: 1), 40)
+        XCTAssertEqual(learner.update(force: 40, contact: 1, time: 3), 40)
+    }
+
+    func testChangingFirmnessRestartsThreeSecondHold() {
+        var learner = TouchpadPressureLearner()
+        for tick in 0..<40 {
+            XCTAssertNil(learner.update(force: 40, contact: 1, time: Double(tick) / 20))
+        }
+        XCTAssertNil(learner.update(force: 80, contact: 1, time: 2))
+        XCTAssertEqual(learner.progress, 0)
+        for tick in 41..<100 {
+            XCTAssertNil(learner.update(force: 80, contact: 1, time: Double(tick) / 20))
+        }
+        XCTAssertEqual(learner.update(force: 80, contact: 1, time: 5), 80)
     }
 
     func testPressureLearningWaitsForReleaseAndResetsAfterLostInput() {

@@ -163,6 +163,8 @@ struct TouchpadPressureFilter {
 }
 
 struct TouchpadPressureLearner {
+    static let holdDuration = 3.0
+    private var anchorForce: Double?
     private var waitingForRelease: Bool
     private var contactID: Int32?
     private var began: Double?
@@ -180,13 +182,15 @@ struct TouchpadPressureLearner {
         guard let force, force.isFinite, force >= 1, force <= 65535,
               let contact, time.isFinite else { clear(); return nil }
         if contactID != contact || lastTime == nil || time < lastTime! || time - lastTime! > 0.25 { clear() }
+        if let anchorForce, abs(force - anchorForce) > max(3, anchorForce * 0.2) { clear() }
+        anchorForce = anchorForce ?? force
         contactID = contact
         began = began ?? time
         lastTime = time
         samples.append(force)
-        if samples.count > 256 { samples.removeFirst() }
-        progress = min(1, (time - began!) / 1.0)
-        guard progress >= 1, samples.count >= 12 else { return nil }
+        if samples.count > 512 { samples.removeFirst() }
+        progress = min(1, (time - began!) / Self.holdDuration)
+        guard progress >= 1, samples.count >= 36 else { return nil }
         // Use a lower percentile of the stable press, so small variation does not
         // make the learned level harder to reproduce than the user's own press.
         let sorted = samples.sorted()
@@ -194,6 +198,6 @@ struct TouchpadPressureLearner {
     }
 
     private mutating func clear() {
-        contactID = nil; began = nil; lastTime = nil; samples.removeAll(); progress = 0
+        anchorForce = nil; contactID = nil; began = nil; lastTime = nil; samples.removeAll(); progress = 0
     }
 }
