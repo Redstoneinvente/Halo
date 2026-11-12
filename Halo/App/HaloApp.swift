@@ -4,6 +4,7 @@ import ApplicationServices
 import CoreGraphics
 import IOKit
 import Combine
+import AppIntents
 
 /// Readiness gate for Halo's normal surface runtime.
 /// HaloFeatureAccess is the authoritative source of truth for the active Lite/Full edition.
@@ -74,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        HaloShortcutsRouter.workspace = store.workspace
         HaloFeedbackService.shared.start()
         HaloReviewPromptCoordinator.shared.start()
         NotificationCenter.default.addObserver(
@@ -2516,5 +2518,85 @@ struct HaloHUDSettingsView: View {
 
     private func preview(_ kind: String) {
         NotificationCenter.default.post(name: .init("HaloHUDPreview"), object: nil, userInfo: ["kind": kind])
+    }
+}
+
+
+// MARK: - Native Siri / Shortcuts actions.
+// Keep these as first-party App Intents, not arbitrary third-party plugin execution.
+@MainActor
+private enum HaloShortcutsRouter {
+    static weak var workspace: WorkspaceStore?
+}
+
+@available(macOS 13.0, *)
+struct HaloToggleIntent: AppIntent {
+    static var title: LocalizedStringResource = "Toggle HALO"
+    static var description = IntentDescription("Toggle the HALO notch workspace.")
+    static var openAppWhenRun: Bool = true
+    func perform() async throws -> some IntentResult {
+        await MainActor.run {
+            NotificationCenter.default.post(name: Notification.Name("HaloToggle"), object: nil)
+        }
+        return .result()
+    }
+}
+
+@available(macOS 13.0, *)
+struct HaloSettingsIntent: AppIntent {
+    static var title: LocalizedStringResource = "Open HALO Settings"
+    static var description = IntentDescription("Open the HALO configuration window.")
+    static var openAppWhenRun: Bool = true
+    func perform() async throws -> some IntentResult {
+        await MainActor.run {
+            NotificationCenter.default.post(name: Notification.Name("HaloOpenSettings"), object: nil)
+        }
+        return .result()
+    }
+}
+
+@available(macOS 13.0, *)
+struct HaloApplyProfileIntent: AppIntent {
+    static var title: LocalizedStringResource = "Apply HALO Profile"
+    static var description = IntentDescription("Apply a saved HALO profile by its exact name.")
+    static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Profile name")
+    var profileName: String
+
+    func perform() async throws -> some IntentResult {
+        await MainActor.run {
+            guard let workspace = HaloShortcutsRouter.workspace,
+                  HaloFeatureAccess.shared.allows(.profiles),
+                  let profile = workspace.settings.profiles.first(where: {
+                      $0.name.caseInsensitiveCompare(profileName) == .orderedSame
+                  }) else { return }
+            workspace.apply(profile)
+        }
+        return .result()
+    }
+}
+
+@available(macOS 13.0, *)
+struct HaloAppShortcuts: AppShortcutsProvider {
+    static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: HaloToggleIntent(),
+            phrases: ["Toggle \(.applicationName)", "Show \(.applicationName) notch"],
+            shortTitle: "Toggle HALO",
+            systemImageName: "rectangle.topthird.inset.filled"
+        )
+        AppShortcut(
+            intent: HaloSettingsIntent(),
+            phrases: ["Open \(.applicationName) settings"],
+            shortTitle: "HALO Settings",
+            systemImageName: "gearshape"
+        )
+        AppShortcut(
+            intent: HaloApplyProfileIntent(),
+            phrases: ["Switch \(.applicationName) profile"],
+            shortTitle: "Apply Profile",
+            systemImageName: "rectangle.3.group"
+        )
     }
 }
