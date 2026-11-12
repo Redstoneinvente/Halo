@@ -60,7 +60,7 @@ struct TouchpadNotchSettingsView: View {
                 .accessibilityLabel(service.settings.hasSpot ? "Saved touchpad spot" : "No touchpad spot saved")
             HStack {
                 Button(service.recording ? "Recording…" : service.settings.hasSpot ? "Record a new spot" : "Record spot") { service.recordSpot() }
-                    .disabled(service.recording)
+                    .disabled(service.recording || !service.inputAvailable)
                 if service.recording { Button("Cancel") { service.cancelRecording() } }
             }
             Text("Click Record, lift your hand, then hold one finger still at the desired physical spot for one second. Recording ends after 15 seconds. The saved spot belongs to that touchpad.")

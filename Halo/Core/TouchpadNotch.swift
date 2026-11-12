@@ -72,3 +72,53 @@ struct TouchpadNotchRecognizer {
         return true
     }
 }
+
+/// Hardware classification must not depend on MultitouchSupport's OpaqueSurface flag.
+enum TouchpadDeviceClassifier {
+    static func isTrackpad(product: String) -> Bool {
+        let name = product.lowercased()
+        return name.contains("trackpad") || name.contains("touchpad")
+    }
+}
+
+/// Records only fresh, continuous single-finger input, independently of activation settings.
+struct TouchpadSpotRecorder {
+    struct Spot: Equatable {
+        let device: UInt64
+        let x: Double
+        let y: Double
+    }
+    private var waitingForRelease: Set<UInt64>
+    private var candidate: (device: UInt64, contact: Int32, x: Double, y: Double, began: Double, last: Double)?
+
+    init(touchingDevices: Set<UInt64> = []) {
+        waitingForRelease = touchingDevices
+    }
+
+    mutating func update(device: UInt64, contacts: [TouchpadNotchRecognizer.Contact], time: Double) -> Spot? {
+        guard time.isFinite else { candidate = nil; return nil }
+        if !waitingForRelease.isEmpty {
+            if contacts.isEmpty { waitingForRelease.remove(device) }
+            return nil
+        }
+        // Empty frames from another connected trackpad cannot cancel this hold.
+        if let candidate, candidate.device != device, contacts.isEmpty { return nil }
+        guard contacts.count == 1, let contact = contacts.first,
+              (0...1).contains(contact.x), (0...1).contains(contact.y) else {
+            candidate = nil
+            return nil
+        }
+        if let previous = candidate, previous.device == device, previous.contact == contact.id,
+           time >= previous.last, time - previous.last <= 0.25,
+           hypot(contact.x - previous.x, contact.y - previous.y) < 0.025 {
+            candidate?.last = time
+            if time - previous.began >= 1 {
+                candidate = nil
+                return Spot(device: device, x: contact.x, y: contact.y)
+            }
+        } else {
+            candidate = (device, contact.id, contact.x, contact.y, time, time)
+        }
+        return nil
+    }
+}

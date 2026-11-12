@@ -15,6 +15,7 @@ final class TouchpadNotchService: ObservableObject {
         }
     }
     @Published private(set) var recording = false
+    @Published private(set) var inputAvailable = false
     @Published private(set) var status = "Touchpad Notch is off."
     @Published private(set) var liveX = 0.5
     @Published private(set) var liveY = 0.5
@@ -29,8 +30,8 @@ final class TouchpadNotchService: ObservableObject {
     private var monitors: [Any] = []
     private var selectedContactID: Int32?
     private var lastFrameTime = 0.0
-    private var recordingWaitingForRelease = false
-    private var recordingCandidate: (device: UInt64, contact: Int32, x: Double, y: Double, began: Double)?
+    private var touchingDevices = Set<UInt64>()
+    private var spotRecorder = TouchpadSpotRecorder()
     private var recordingTimeout: Task<Void, Never>?
     private var asleep = false
 
@@ -59,6 +60,8 @@ final class TouchpadNotchService: ObservableObject {
     func stop() {
         cancelRecording()
         input.stop()
+        inputAvailable = false
+        touchingDevices.removeAll()
         removeMonitors()
         subscriptions.removeAll()
         observers.forEach(NSWorkspace.shared.notificationCenter.removeObserver)
@@ -66,10 +69,9 @@ final class TouchpadNotchService: ObservableObject {
     }
 
     func recordSpot() {
-        guard settings.enabled, HaloRuntimeGate.shared.isReady, !asleep else { return }
+        guard settings.enabled, HaloRuntimeGate.shared.isReady, !asleep, inputAvailable else { return }
         recording = true
-        recordingWaitingForRelease = true
-        recordingCandidate = nil
+        spotRecorder = TouchpadSpotRecorder(touchingDevices: touchingDevices)
         recognizer.reset()
         status = "Lift all fingers, then hold one finger on the desired spot for one second."
         recordingTimeout?.cancel()
@@ -85,11 +87,14 @@ final class TouchpadNotchService: ObservableObject {
         recordingTimeout?.cancel()
         recordingTimeout = nil
         recording = false
-        recordingCandidate = nil
+        spotRecorder = TouchpadSpotRecorder()
         recognizer.reset()
     }
 
     func sync() {
+        cancelRecording()
+        inputAvailable = false
+        touchingDevices.removeAll()
         input.stop()
         removeMonitors()
         recognizer.reset()
@@ -105,6 +110,7 @@ final class TouchpadNotchService: ObservableObject {
             cancelRecording()
             return
         }
+        inputAvailable = true
         let mask: NSEvent.EventTypeMask = [.pressure, .leftMouseUp, .rightMouseUp]
         if let monitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] event in
             Task { @MainActor in self?.receivePressure(event) }
@@ -125,26 +131,20 @@ final class TouchpadNotchService: ObservableObject {
         guard settings.enabled, HaloRuntimeGate.shared.isReady, !asleep else { return }
         // Reject a backlog delivered after the app was busy; it must never trigger later.
         guard ProcessInfo.processInfo.systemUptime - time < 0.25 else { recognizer.reset(); return }
+        if contacts.isEmpty { touchingDevices.remove(device) } else { touchingDevices.insert(device) }
         if recording {
-            if recordingWaitingForRelease {
-                if contacts.isEmpty { recordingWaitingForRelease = false }
-                return
+            if contacts.count == 1, let contact = contacts.first {
+                liveX = contact.x; liveY = contact.y
             }
-            guard contacts.count == 1, let contact = contacts.first,
-                  (0...1).contains(contact.x), (0...1).contains(contact.y) else { recordingCandidate = nil; return }
-            liveX = contact.x; liveY = contact.y
-            if let candidate = recordingCandidate, candidate.device == device, candidate.contact == contact.id,
-               hypot(contact.x - candidate.x, contact.y - candidate.y) < 0.025 {
-                if time - candidate.began >= 1 {
-                    cancelRecording()
-                    settings.x = contact.x; settings.y = contact.y
-                    settings.deviceID = device; settings.hasSpot = true
-                    // Require a fresh touch after recording.
-                    _ = recognizer.update(contacts: [contact, contact], pressure: nil, timestamp: time, isOpen: false, settings: settings)
-                    status = "Spot saved. Lift your finger before trying it."
-                    feedback()
-                }
-            } else { recordingCandidate = (device, contact.id, contact.x, contact.y, time) }
+            if let spot = spotRecorder.update(device: device, contacts: contacts, time: time) {
+                cancelRecording()
+                settings.x = spot.x; settings.y = spot.y
+                settings.deviceID = spot.device; settings.hasSpot = true
+                // Require a fresh touch after recording.
+                _ = recognizer.update(contacts: contacts + contacts, pressure: nil, timestamp: time, isOpen: false, settings: settings)
+                status = "Spot saved. Lift your finger before trying it."
+                feedback()
+            }
             return
         }
         guard device == settings.deviceID else { return }

@@ -1863,3 +1863,62 @@ final class TouchpadNotchTests: XCTestCase {
         XCTAssertEqual(report.package?.manifest.id, "com.halo.touchpad")
     }
 }
+
+final class TouchpadRecordingTests: XCTestCase {
+    private let finger = TouchpadNotchRecognizer.Contact(id: 1, x: 0.4, y: 0.7)
+
+    func testAppleInternalAndMagicTrackpadsAreRecognized() {
+        XCTAssertTrue(TouchpadDeviceClassifier.isTrackpad(product: "Apple Internal Keyboard / Trackpad"))
+        XCTAssertTrue(TouchpadDeviceClassifier.isTrackpad(product: "Magic Trackpad 2"))
+        XCTAssertTrue(TouchpadDeviceClassifier.isTrackpad(product: "USB Touchpad"))
+        XCTAssertFalse(TouchpadDeviceClassifier.isTrackpad(product: "Magic Mouse"))
+        XCTAssertFalse(TouchpadDeviceClassifier.isTrackpad(product: "Touch Bar"))
+    }
+
+    func testRecordingAlreadyIdleDoesNotRequireAnEmptyFrame() {
+        var recorder = TouchpadSpotRecorder()
+        for tick in 0..<10 {
+            XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: Double(tick) / 10))
+        }
+        XCTAssertEqual(recorder.update(device: 7, contacts: [finger], time: 1), .init(device: 7, x: 0.4, y: 0.7))
+    }
+
+    func testFingerUsedToClickRecordMustLiftBeforeCapture() {
+        var recorder = TouchpadSpotRecorder(touchingDevices: [7])
+        for tick in 0...12 {
+            XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: Double(tick) / 10))
+        }
+        XCTAssertNil(recorder.update(device: 7, contacts: [], time: 1.3))
+        for tick in 14..<24 {
+            XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: Double(tick) / 10))
+        }
+        XCTAssertNotNil(recorder.update(device: 7, contacts: [finger], time: 2.5))
+    }
+
+    func testIdleSecondDeviceCannotInterruptRecording() {
+        var recorder = TouchpadSpotRecorder()
+        for tick in 0..<10 {
+            XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: Double(tick) / 10))
+            XCTAssertNil(recorder.update(device: 8, contacts: [], time: Double(tick) / 10))
+        }
+        XCTAssertNotNil(recorder.update(device: 7, contacts: [finger], time: 1))
+    }
+
+    func testMissingFramesCannotFinishRecording() {
+        var recorder = TouchpadSpotRecorder()
+        XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: 0))
+        XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: 2))
+        XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: 2.1))
+    }
+
+    func testMovingOrAddingFingerRestartsRecording() {
+        var recorder = TouchpadSpotRecorder()
+        for tick in 0..<9 {
+            XCTAssertNil(recorder.update(device: 7, contacts: [finger], time: Double(tick) / 10))
+        }
+        let moved = TouchpadNotchRecognizer.Contact(id: 1, x: 0.7, y: 0.7)
+        XCTAssertNil(recorder.update(device: 7, contacts: [moved], time: 0.9))
+        XCTAssertNil(recorder.update(device: 7, contacts: [moved, finger], time: 1))
+        XCTAssertNil(recorder.update(device: 7, contacts: [moved], time: 1.1))
+    }
+}

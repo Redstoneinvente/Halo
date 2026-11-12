@@ -1,6 +1,7 @@
 import Foundation
 #if HALO_DIRECT
 import Darwin
+import IOKit
 
 // System-framework ABI only; no package-provided native code is loaded. This private API
 // is excluded from App Store builds. Keep density/size separate from real force events.
@@ -30,7 +31,7 @@ private let touchpadFrameCallback: MTCallback = { device, data, count, _, _ in
     let buffer = data?.assumingMemoryBound(to: MTContact.self)
     var contacts: [TouchpadNotchRecognizer.Contact] = []
     for index in 0..<Int(count) {
-        guard let value = buffer?[index], value.state == 4 else { continue }
+        guard let value = buffer?[index], (value.state == 3 || value.state == 4) else { continue }
         contacts.append(.init(id: value.identifier, x: Double(value.normalized.position.x), y: Double(value.normalized.position.y)))
     }
     TouchpadInput.delivery.send(device: UInt(bitPattern: device), contacts: contacts)
@@ -60,7 +61,7 @@ final class TouchpadInput {
     private typealias Start = @convention(c) (UnsafeMutableRawPointer, Int32) -> Int32
     private typealias Stop = @convention(c) (UnsafeMutableRawPointer) -> Int32
     private typealias DeviceID = @convention(c) (UnsafeMutableRawPointer, UnsafeMutablePointer<UInt64>) -> Int32
-    private typealias Opaque = @convention(c) (UnsafeMutableRawPointer) -> Bool
+    private typealias Service = @convention(c) (UnsafeMutableRawPointer) -> io_service_t
     private var library: UnsafeMutableRawPointer?
     private var deviceList: CFArray?
     private var devices: [UnsafeMutableRawPointer] = []
@@ -86,7 +87,7 @@ final class TouchpadInput {
               let start = symbol("MTDeviceStart", Start.self),
               let stop = symbol("MTDeviceStop", Stop.self),
               let deviceID = symbol("MTDeviceGetDeviceID", DeviceID.self),
-              let opaque = symbol("MTDeviceIsOpaqueSurface", Opaque.self),
+              let service = symbol("MTDeviceGetService", Service.self),
               let list = create()?.takeRetainedValue() else { return "This macOS version does not support touchpad monitoring." }
         self.unregister = unregister
         stopDevice = stop
@@ -96,7 +97,13 @@ final class TouchpadInput {
             guard let raw = CFArrayGetValueAtIndex(list, index) else { continue }
             let device = UnsafeMutableRawPointer(mutating: raw)
             var id: UInt64 = 0
-            guard opaque(device), deviceID(device, &id) == 0 else { continue }
+            // OpaqueSurface is false even on current Apple internal trackpads. Identify
+            // the hardware through its IOKit product instead of treating that flag as type.
+            let registryService = service(device)
+            guard registryService != 0,
+                  let product = IORegistryEntryCreateCFProperty(registryService, "Product" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String,
+                  TouchpadDeviceClassifier.isTrackpad(product: product),
+                  deviceID(device, &id) == 0 else { continue }
             devices.append(device)
             ids[UInt(bitPattern: device)] = id
         }
@@ -109,7 +116,21 @@ final class TouchpadInput {
                 handler(id, contacts, time)
             }
         }
-        for device in devices { register(device, touchpadFrameCallback); _ = start(device, 0) }
+        var startedDevices: [UnsafeMutableRawPointer] = []
+        for device in devices {
+            register(device, touchpadFrameCallback)
+            if start(device, 0) == 0 {
+                startedDevices.append(device)
+            } else {
+                unregister(device, touchpadFrameCallback)
+            }
+        }
+        devices = startedDevices
+        guard !devices.isEmpty else {
+            Self.delivery.set(nil)
+            deviceList = nil
+            return "Could not start touchpad monitoring. Retry the connection."
+        }
         return nil
 #else
         return "Touchpad Notch requires the direct-download edition of Halo."
