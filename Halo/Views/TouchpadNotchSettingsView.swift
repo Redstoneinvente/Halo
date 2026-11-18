@@ -7,7 +7,7 @@ struct TouchpadNotchSettingsView: View {
 
     var body: some View {
         Section("Touchpad Notch") {
-            Text("Hold a saved spot on your touchpad to open or close Halo.")
+            Text("Hold a saved spot on your touchpad to open Halo or run a quick action.")
             if HaloDistribution.current == .appStore {
                 Text("System-wide touchpad spots are available in Halo’s direct-download edition.")
             } else {
@@ -15,13 +15,19 @@ struct TouchpadNotchSettingsView: View {
                 Text(service.status).font(.caption).foregroundStyle(.secondary)
                 if service.settings.enabled {
                     spotControls
-                    Picker("Open", selection: $service.settings.destination) {
-                        Text("Halo notch").tag(TouchpadNotchSettings.Destination.notch)
-                        Text("Touchpad CI").tag(TouchpadNotchSettings.Destination.touchpadCI)
+                    Picker("Hold action", selection: $service.settings.destination) {
+                        ForEach(TouchpadNotchSettings.Destination.allCases, id: \.self) { action in
+                            Text(action.title).tag(action)
+                        }
                     }
                     if service.settings.destination == .touchpadCI { ciControls }
-                    duration("Hold to open", value: $service.settings.openHold)
-                    duration("Hold to close", value: $service.settings.closeHold)
+                    duration(service.settings.destination.togglesSurface ? "Hold to open" : "Hold to activate", value: $service.settings.openHold)
+                    if service.settings.destination.togglesSurface {
+                        duration("Hold to close", value: $service.settings.closeHold)
+                    } else {
+                        Text("One action per hold. Lift your finger before repeating. Volume changes by one step (6.25%). Media controls target the current player. Mute affects audio output, not your microphone.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     LabeledContent("Required pressure") {
                         Slider(value: $service.settings.minimumPressure, in: 0...1, step: 0.05)
                         Text(service.settings.minimumPressure == 0 ? "Any" : "\(Int(service.settings.minimumPressure * 100))%")
@@ -43,7 +49,7 @@ struct TouchpadNotchSettingsView: View {
                     }
                     Text("Uses the saved touchpad’s force sensor, even outside Halo. Click Record pressure, press the saved spot at your preferred firmness, then hold steady for three seconds. Two haptic taps confirm it is saved. Changing pressure or lifting restarts the hold. Fine-tune the threshold above. Readings are smoothed to reduce jitter. Use Any for touch-only activation. Trackpads without force readings cannot activate a nonzero threshold.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Toggle("Haptic feedback when spot is saved, opened or closed", isOn: $service.settings.haptics)
+                    Toggle("Haptic feedback for saved spots and actions", isOn: $service.settings.haptics)
                     Text("Haptics require a compatible Force Touch trackpad. The spot does not block normal pointer movement or clicks; multi-finger gestures do not activate it.")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("Retry touchpad connection") { service.sync() }

@@ -1,7 +1,33 @@
 import Foundation
 
 struct TouchpadNotchSettings: Codable, Equatable {
-    enum Destination: String, Codable, CaseIterable { case notch, touchpadCI }
+    enum Destination: String, Codable, CaseIterable {
+        case notch, touchpadCI, playPause, nextTrack, previousTrack, mute, volumeDown, volumeUp
+
+        var title: String {
+            switch self {
+            case .notch: return "Halo notch"
+            case .touchpadCI: return "Touchpad CI"
+            case .playPause: return "Play / pause"
+            case .nextTrack: return "Next track"
+            case .previousTrack: return "Previous track"
+            case .mute: return "Mute / unmute output"
+            case .volumeDown: return "Volume down"
+            case .volumeUp: return "Volume up"
+            }
+        }
+
+        var togglesSurface: Bool { self == .notch || self == .touchpadCI }
+
+        var mediaCommand: String? {
+            switch self {
+            case .playPause: return "playpause"
+            case .nextTrack: return "next track"
+            case .previousTrack: return "previous track"
+            default: return nil
+            }
+        }
+    }
     var enabled = false
     var x = 0.5
     var y = 0.9

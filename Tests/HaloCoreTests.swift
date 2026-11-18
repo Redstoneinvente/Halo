@@ -2009,3 +2009,44 @@ final class TouchpadPressureTests: XCTestCase {
         XCTAssertEqual(decoded.minimumPressure, 0)
     }
 }
+
+final class TouchpadQuickActionTests: XCTestCase {
+    func testExistingDestinationValuesRemainCompatible() throws {
+        for destination in [TouchpadNotchSettings.Destination.notch, .touchpadCI] {
+            var settings = TouchpadNotchSettings()
+            settings.destination = destination
+            let data = try JSONEncoder().encode(settings)
+            XCTAssertEqual(try JSONDecoder().decode(TouchpadNotchSettings.self, from: data), settings)
+        }
+    }
+
+    func testQuickActionsRoundTripAndRequireFreshTouch() throws {
+        for action in TouchpadNotchSettings.Destination.allCases where !action.togglesSurface {
+            var settings = TouchpadNotchSettings()
+            settings.enabled = true
+            settings.hasSpot = true
+            settings.destination = action
+            settings.openHold = 0.2
+            settings.closeHold = 5
+            XCTAssertEqual(try JSONDecoder().decode(TouchpadNotchSettings.self,
+                from: JSONEncoder().encode(settings)), settings)
+            let finger = TouchpadNotchRecognizer.Contact(id: 1, x: settings.x, y: settings.y)
+            var recognizer = TouchpadNotchRecognizer()
+            XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: 0, isOpen: false, settings: settings))
+            XCTAssertTrue(recognizer.update(contacts: [finger], pressure: nil, timestamp: 0.21, isOpen: false, settings: settings))
+            XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: 0.42, isOpen: false, settings: settings))
+            XCTAssertFalse(recognizer.update(contacts: [], pressure: nil, timestamp: 0.5, isOpen: false, settings: settings))
+            XCTAssertFalse(recognizer.update(contacts: [finger], pressure: nil, timestamp: 0.6, isOpen: false, settings: settings))
+            XCTAssertTrue(recognizer.update(contacts: [finger], pressure: nil, timestamp: 0.81, isOpen: false, settings: settings))
+        }
+    }
+
+    func testOnlyMediaActionsExposeTransportCommands() {
+        XCTAssertEqual(TouchpadNotchSettings.Destination.playPause.mediaCommand, "playpause")
+        XCTAssertEqual(TouchpadNotchSettings.Destination.nextTrack.mediaCommand, "next track")
+        XCTAssertEqual(TouchpadNotchSettings.Destination.previousTrack.mediaCommand, "previous track")
+        for action in [TouchpadNotchSettings.Destination.notch, .touchpadCI, .mute, .volumeDown, .volumeUp] {
+            XCTAssertNil(action.mediaCommand)
+        }
+    }
+}

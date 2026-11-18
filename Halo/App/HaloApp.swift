@@ -89,6 +89,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let touchpad = TouchpadNotchService.shared
         touchpad.notchIsOpen = { [weak self] in self?.engine?.touchpadNotchIsOpen ?? false }
         touchpad.toggleNotch = { [weak self] in self?.engine?.toggleTouchpadNotch() }
+        touchpad.performQuickAction = { [weak self] action in
+            guard let workspace = self?.store.workspace else { return "Halo is not ready." }
+            if let command = action.mediaCommand {
+                guard !workspace.media.busy else { return "Player is busy. Lift your finger and try again." }
+                // A previous asynchronous error must not reject a newly requested action.
+                workspace.media.error = nil
+                if let app = workspace.media.connectedApp, !app.isEmpty {
+                    workspace.media.perform(command, app: app)
+                } else {
+                    workspace.media.performSystem(command)
+                }
+                return workspace.media.error
+            }
+            workspace.audio.refresh()
+            guard workspace.audio.canSetVolume else { return "This audio output does not support volume control." }
+            switch action {
+            case .mute: workspace.audio.toggleMute()
+            case .volumeDown: workspace.audio.setVolume(workspace.audio.volume - 1.0 / 16)
+            case .volumeUp: workspace.audio.setVolume(workspace.audio.volume + 1.0 / 16)
+            default: return "Unsupported touchpad action."
+            }
+            return nil
+        }
         touchpad.start()
         configureCommercialAccessGate()
 

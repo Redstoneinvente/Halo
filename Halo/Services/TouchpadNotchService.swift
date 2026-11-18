@@ -24,6 +24,8 @@ final class TouchpadNotchService: ObservableObject {
     @Published private(set) var pressureLearningProgress = 0.0
     var notchIsOpen: (() -> Bool)?
     var toggleNotch: (() -> Void)?
+    /// First-party actions use the same workspace services as Halo's built-in controls.
+    var performQuickAction: ((TouchpadNotchSettings.Destination) -> String?)?
     private static let key = "HaloTouchpadNotch.v1"
     private let input = TouchpadInput()
     private var recognizer = TouchpadNotchRecognizer()
@@ -186,12 +188,21 @@ final class TouchpadNotchService: ObservableObject {
             return
         }
         let ci = HaloCustomCIRuntimeStore.shared
-        let isOpen = settings.destination == .notch ? (notchIsOpen?() ?? false) : ci.manualActivationID == Self.packageID
+        let isOpen = settings.destination == .notch ? (notchIsOpen?() ?? false)
+            : settings.destination == .touchpadCI && ci.manualActivationID == Self.packageID
         guard recognizer.update(contacts: contacts, pressure: currentPressure, timestamp: time, isOpen: isOpen, settings: settings) else { return }
         switch settings.destination {
         case .notch:
             toggleNotch?()
             feedback()
+        case .playPause, .nextTrack, .previousTrack, .mute, .volumeDown, .volumeUp:
+            guard let performQuickAction else { status = "Action unavailable. Try restarting Halo."; return }
+            if let error = performQuickAction(settings.destination) {
+                status = error
+            } else {
+                status = "\(settings.destination.title) requested. Lift your finger to repeat."
+                feedback()
+            }
         case .touchpadCI:
             guard HaloFeatureAccess.shared.allows(.customCI), !UserDefaults.standard.bool(forKey: "HaloDisableCustomCI"),
                   ci.package(id: Self.packageID) != nil, ci.isEnabled(Self.packageID) else {
