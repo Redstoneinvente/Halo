@@ -104,13 +104,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             workspace.audio.refresh()
             guard workspace.audio.canSetVolume else { return "This audio output does not support volume control." }
+            workspace.audio.error = nil
             switch action {
             case .mute: workspace.audio.toggleMute()
             case .volumeDown: workspace.audio.setVolume(workspace.audio.volume - 1.0 / 16)
             case .volumeUp: workspace.audio.setVolume(workspace.audio.volume + 1.0 / 16)
             default: return "Unsupported touchpad action."
             }
-            return nil
+            return workspace.audio.error
         }
         touchpad.start()
         configureCommercialAccessGate()

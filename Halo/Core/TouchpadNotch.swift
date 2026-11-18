@@ -40,6 +40,9 @@ struct TouchpadNotchSettings: Codable, Equatable {
     var pressureReference: Double?
     var haptics = true
     var destination: Destination = .notch
+    // Optional so existing saved spots decode without migration.
+    var quickGestures: Bool?
+    var usesQuickGestures: Bool { quickGestures ?? true }
 
     func normalized() -> Self {
         var result = self
@@ -225,5 +228,59 @@ struct TouchpadPressureLearner {
 
     private mutating func clear() {
         anchorForce = nil; contactID = nil; began = nil; lastTime = nil; samples.removeAll(); progress = 0
+    }
+}
+
+/// Quick controls start at the saved spot; dragging into it never arms a control.
+struct TouchpadQuickGestureRecognizer {
+    private var origin: TouchpadNotchRecognizer.Contact?
+    private var began = 0.0
+    private var lastTime: Double?
+    private var blocked = false
+    private var moved = false
+    private var qualified = false
+    private var lastY = 0.0
+
+    mutating func reset() { self = Self() }
+    mutating func requireRelease() { reset(); blocked = true }
+
+    mutating func update(contacts: [TouchpadNotchRecognizer.Contact], pressure: Double?,
+                         timestamp: Double, settings: TouchpadNotchSettings) -> TouchpadNotchSettings.Destination? {
+        guard settings.enabled, settings.hasSpot, !settings.destination.togglesSurface,
+              timestamp.isFinite else { reset(); return nil }
+        let action = settings.destination
+        if contacts.isEmpty {
+            let tap = !blocked && !moved && qualified && origin != nil && timestamp >= began
+                && timestamp - began >= 0.04 && timestamp - began <= 0.45
+                && (action == .playPause || action == .mute)
+            reset()
+            return tap ? action : nil
+        }
+        guard !blocked, contacts.count == 1, let finger = contacts.first,
+              (0...1).contains(finger.x), (0...1).contains(finger.y) else { blocked = true; return nil }
+        if let lastTime, timestamp < lastTime || timestamp - lastTime > 0.25 { blocked = true; return nil }
+        lastTime = timestamp
+        if origin == nil {
+            guard hypot(finger.x - settings.x, finger.y - settings.y) <= settings.radius else { blocked = true; return nil }
+            origin = finger; began = timestamp; lastY = finger.y
+        }
+        guard let origin, origin.id == finger.id else { blocked = true; return nil }
+        qualified = qualified || settings.minimumPressure == 0
+            || (pressure.map { $0.isFinite && $0 >= settings.minimumPressure } ?? false)
+        guard qualified else { return nil }
+        let dx = finger.x - origin.x, dy = finger.y - origin.y
+        if hypot(dx, dy) > 0.025 { moved = true }
+        switch action {
+        case .nextTrack, .previousTrack:
+            guard abs(dx) >= 0.08, abs(dx) > abs(dy) * 1.5 else { return nil }
+            blocked = true
+            return dx > 0 ? .nextTrack : .previousTrack
+        case .volumeUp, .volumeDown:
+            guard abs(dy) > abs(dx) * 1.5, abs(finger.y - lastY) >= 0.035 else { return nil }
+            let result: TouchpadNotchSettings.Destination = finger.y > lastY ? .volumeUp : .volumeDown
+            lastY = finger.y
+            return result
+        default: return nil
+        }
     }
 }

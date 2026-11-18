@@ -11,6 +11,7 @@ final class TouchpadNotchService: ObservableObject {
             if settings != normalized { settings = normalized; return }
             if let data = try? JSONEncoder().encode(settings) { UserDefaults.standard.set(data, forKey: Self.key) }
             recognizer.reset()
+            quickRecognizer.reset()
             if settings.enabled != oldValue.enabled { sync() }
         }
     }
@@ -20,6 +21,7 @@ final class TouchpadNotchService: ObservableObject {
     @Published private(set) var liveX = 0.5
     @Published private(set) var liveY = 0.5
     @Published private(set) var pressure: Double?
+    @Published private(set) var inputHint = "Lift, then touch your saved spot."
     @Published private(set) var learningPressure = false
     @Published private(set) var pressureLearningProgress = 0.0
     var notchIsOpen: (() -> Bool)?
@@ -29,6 +31,7 @@ final class TouchpadNotchService: ObservableObject {
     private static let key = "HaloTouchpadNotch.v1"
     private let input = TouchpadInput()
     private var recognizer = TouchpadNotchRecognizer()
+    private var quickRecognizer = TouchpadQuickGestureRecognizer()
     private var subscriptions = Set<AnyCancellable>()
     private var observers: [NSObjectProtocol] = []
     private var pressureFilter = TouchpadPressureFilter()
@@ -79,6 +82,7 @@ final class TouchpadNotchService: ObservableObject {
         recording = true
         spotRecorder = TouchpadSpotRecorder(touchingDevices: touchingDevices)
         recognizer.reset()
+        quickRecognizer.reset()
         status = "Lift all fingers, then hold one finger on the desired spot for one second."
         recordingTimeout?.cancel()
         recordingTimeout = Task { [weak self] in
@@ -95,6 +99,7 @@ final class TouchpadNotchService: ObservableObject {
         recording = false
         spotRecorder = TouchpadSpotRecorder()
         recognizer.reset()
+        quickRecognizer.reset()
     }
 
     func sync() {
@@ -104,6 +109,7 @@ final class TouchpadNotchService: ObservableObject {
         input.stop()
         cancelPressureLearning()
         recognizer.reset()
+        quickRecognizer.reset()
         pressureFilter.reset()
         pressure = nil
         guard settings.enabled, HaloRuntimeGate.shared.isReady, !asleep else {
@@ -127,6 +133,7 @@ final class TouchpadNotchService: ObservableObject {
         pressureLearner = TouchpadPressureLearner(waitingForRelease: settings.deviceID.map(touchingDevices.contains) ?? false)
         pressureLearningProgress = 0
         recognizer.reset()
+        quickRecognizer.reset()
         status = "Lift your finger, press the saved spot at your preferred firmness, and hold steady for three seconds until you feel two taps."
         pressureTimeout?.cancel()
         pressureTimeout = Task { [weak self] in
@@ -142,6 +149,7 @@ final class TouchpadNotchService: ObservableObject {
         learningPressure = false; pressureLearningProgress = 0
         pressureLearner = TouchpadPressureLearner()
         recognizer.reset()
+        quickRecognizer.reset()
     }
 
     private func frame(device: UInt64, contacts: [TouchpadNotchRecognizer.Contact], time: Double) {
@@ -159,6 +167,7 @@ final class TouchpadNotchService: ObservableObject {
                 settings.deviceID = spot.device; settings.hasSpot = true
                 // Require a fresh touch after recording.
                 _ = recognizer.update(contacts: contacts + contacts, pressure: nil, timestamp: time, isOpen: false, settings: settings)
+                quickRecognizer.requireRelease()
                 status = "Spot saved. Lift your finger before trying it."
                 feedback()
             }
@@ -171,6 +180,13 @@ final class TouchpadNotchService: ObservableObject {
         if presentPressure {
             pressure = currentPressure
             lastPressurePresentation = time
+            if contacts.isEmpty { inputHint = "Lift, then touch your saved spot." }
+            else if contacts.count != 1 { inputHint = "Use one finger. Lift all fingers to try again." }
+            else if let contact, hypot(contact.x - settings.x, contact.y - settings.y) > settings.radius {
+                inputHint = "Finger is outside the saved spot. Slides must start inside it."
+            } else if settings.minimumPressure > 0 && (currentPressure ?? 0) < settings.minimumPressure {
+                inputHint = "Required pressure not reached. Press more firmly or lower Required pressure."
+            } else { inputHint = "Saved spot detected." }
         }
         if learningPressure {
             let inSpot = contact.map { hypot($0.x - settings.x, $0.y - settings.y) <= settings.radius } ?? false
@@ -180,10 +196,17 @@ final class TouchpadNotchService: ObservableObject {
                 settings.minimumPressure = 0.8
                 pressureFilter.reset()
                 _ = recognizer.update(contacts: contacts + contacts, pressure: nil, timestamp: time, isOpen: false, settings: settings)
+                quickRecognizer.requireRelease()
                 status = "Pressure recorded. Lift your finger before trying it."
                 HaloHoverHaptics.pulse(id: "touchpad.pressureRecorded", strength: 3, pattern: .doubleTap)
             } else if presentPressure {
                 pressureLearningProgress = pressureLearner.progress
+            }
+            return
+        }
+        if !settings.destination.togglesSurface && settings.usesQuickGestures {
+            if let action = quickRecognizer.update(contacts: contacts, pressure: currentPressure, timestamp: time, settings: settings) {
+                runQuickAction(action)
             }
             return
         }
@@ -196,13 +219,7 @@ final class TouchpadNotchService: ObservableObject {
             toggleNotch?()
             feedback()
         case .playPause, .nextTrack, .previousTrack, .mute, .volumeDown, .volumeUp:
-            guard let performQuickAction else { status = "Action unavailable. Try restarting Halo."; return }
-            if let error = performQuickAction(settings.destination) {
-                status = error
-            } else {
-                status = "\(settings.destination.title) requested. Lift your finger to repeat."
-                feedback()
-            }
+            runQuickAction(settings.destination)
         case .touchpadCI:
             guard HaloFeatureAccess.shared.allows(.customCI), !UserDefaults.standard.bool(forKey: "HaloDisableCustomCI"),
                   ci.package(id: Self.packageID) != nil, ci.isEnabled(Self.packageID) else {
@@ -212,6 +229,20 @@ final class TouchpadNotchService: ObservableObject {
             if isOpen { ci.dismiss(Self.packageID) } else { ci.requestManualActivation(Self.packageID) }
             // The existing arbiter can decline the request; acknowledge only accepted state.
             if isOpen || ci.manualActivationID == Self.packageID { feedback() }
+        }
+    }
+
+    func testQuickAction() { runQuickAction(settings.destination) }
+
+    private func runQuickAction(_ action: TouchpadNotchSettings.Destination) {
+        guard settings.enabled, HaloRuntimeGate.shared.isReady, !asleep,
+              !action.togglesSurface else { return }
+        guard let performQuickAction else { status = "Action unavailable. Try restarting Halo."; return }
+        if let error = performQuickAction(action) {
+            status = error
+        } else {
+            status = "\(action.title) requested."
+            feedback()
         }
     }
 

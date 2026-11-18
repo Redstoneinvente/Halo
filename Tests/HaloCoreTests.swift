@@ -2050,3 +2050,62 @@ final class TouchpadQuickActionTests: XCTestCase {
         }
     }
 }
+
+final class TouchpadQuickGestureTests: XCTestCase {
+    private func settings(_ action: TouchpadNotchSettings.Destination) -> TouchpadNotchSettings {
+        var s = TouchpadNotchSettings(); s.enabled = true; s.hasSpot = true
+        s.x = 0.5; s.y = 0.5; s.destination = action
+        return s
+    }
+    private func finger(_ x: Double = 0.5, _ y: Double = 0.5) -> TouchpadNotchRecognizer.Contact {
+        .init(id: 1, x: x, y: y)
+    }
+    func testTapFiresOnReleaseAndLongHoldDoesNot() {
+        for action in [TouchpadNotchSettings.Destination.playPause, .mute] {
+            var r = TouchpadQuickGestureRecognizer(); let s = settings(action)
+            XCTAssertNil(r.update(contacts: [finger()], pressure: nil, timestamp: 0, settings: s))
+            XCTAssertEqual(r.update(contacts: [], pressure: nil, timestamp: 0.15, settings: s), action)
+            XCTAssertNil(r.update(contacts: [finger()], pressure: nil, timestamp: 1, settings: s))
+            XCTAssertNil(r.update(contacts: [], pressure: nil, timestamp: 2, settings: s))
+        }
+    }
+    func testSwipeSelectsDirectionOnceAndCanLeaveSpot() {
+        for x in [0.35, 0.65] {
+            var r = TouchpadQuickGestureRecognizer(); let s = settings(.nextTrack)
+            XCTAssertNil(r.update(contacts: [finger()], pressure: nil, timestamp: 0, settings: s))
+            XCTAssertEqual(r.update(contacts: [finger(x)], pressure: nil, timestamp: 0.1, settings: s), x > 0.5 ? .nextTrack : .previousTrack)
+            XCTAssertNil(r.update(contacts: [finger(x)], pressure: nil, timestamp: 0.2, settings: s))
+        }
+    }
+    func testVolumeSlideRepeatsAndReverses() {
+        var r = TouchpadQuickGestureRecognizer(); let s = settings(.volumeUp)
+        XCTAssertNil(r.update(contacts: [finger()], pressure: nil, timestamp: 0, settings: s))
+        XCTAssertEqual(r.update(contacts: [finger(0.5, 0.54)], pressure: nil, timestamp: 0.1, settings: s), .volumeUp)
+        XCTAssertEqual(r.update(contacts: [finger(0.5, 0.58)], pressure: nil, timestamp: 0.2, settings: s), .volumeUp)
+        XCTAssertEqual(r.update(contacts: [finger(0.5, 0.53)], pressure: nil, timestamp: 0.3, settings: s), .volumeDown)
+    }
+    func testEnteringSpotAndMultipleFingersCannotArm() {
+        var r = TouchpadQuickGestureRecognizer(); let s = settings(.playPause)
+        XCTAssertNil(r.update(contacts: [finger(0.8)], pressure: nil, timestamp: 0, settings: s))
+        XCTAssertNil(r.update(contacts: [finger()], pressure: nil, timestamp: 0.1, settings: s))
+        XCTAssertNil(r.update(contacts: [], pressure: nil, timestamp: 0.2, settings: s))
+        XCTAssertNil(r.update(contacts: [finger(), finger()], pressure: nil, timestamp: 1, settings: s))
+        XCTAssertNil(r.update(contacts: [finger()], pressure: nil, timestamp: 1.1, settings: s))
+        XCTAssertNil(r.update(contacts: [], pressure: nil, timestamp: 1.2, settings: s))
+    }
+    func testPressureAndRecordingReleaseGuard() {
+        var r = TouchpadQuickGestureRecognizer(); var s = settings(.mute); s.minimumPressure = 0.8
+        XCTAssertNil(r.update(contacts: [finger()], pressure: 0.2, timestamp: 0, settings: s))
+        XCTAssertNil(r.update(contacts: [], pressure: nil, timestamp: 0.1, settings: s))
+        r.requireRelease()
+        XCTAssertNil(r.update(contacts: [finger()], pressure: 1, timestamp: 1, settings: s))
+        XCTAssertNil(r.update(contacts: [], pressure: nil, timestamp: 1.1, settings: s))
+        XCTAssertNil(r.update(contacts: [finger()], pressure: 1, timestamp: 2, settings: s))
+        XCTAssertEqual(r.update(contacts: [], pressure: nil, timestamp: 2.1, settings: s), .mute)
+    }
+    func testOlderSettingsDefaultToQuickGestures() throws {
+        var s = settings(.playPause); s.quickGestures = nil
+        let decoded = try JSONDecoder().decode(TouchpadNotchSettings.self, from: JSONEncoder().encode(s))
+        XCTAssertTrue(decoded.usesQuickGestures)
+    }
+}

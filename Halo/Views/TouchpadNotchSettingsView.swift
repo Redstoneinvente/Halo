@@ -7,7 +7,7 @@ struct TouchpadNotchSettingsView: View {
 
     var body: some View {
         Section("Touchpad Notch") {
-            Text("Hold a saved spot on your touchpad to open Halo or run a quick action.")
+            Text("Use your saved touchpad spot to open Halo or control media and volume.")
             if HaloDistribution.current == .appStore {
                 Text("System-wide touchpad spots are available in Halo’s direct-download edition.")
             } else {
@@ -15,24 +15,50 @@ struct TouchpadNotchSettingsView: View {
                 Text(service.status).font(.caption).foregroundStyle(.secondary)
                 if service.settings.enabled {
                     spotControls
-                    Picker("Hold action", selection: $service.settings.destination) {
-                        ForEach(TouchpadNotchSettings.Destination.allCases, id: \.self) { action in
-                            Text(action.title).tag(action)
+                    Picker("Spot control", selection: Binding(
+                        get: {
+                            if service.settings.usesQuickGestures {
+                                if service.settings.destination == .previousTrack { return .nextTrack }
+                                if service.settings.destination == .volumeDown { return .volumeUp }
+                            }
+                            return service.settings.destination
+                        }, set: { service.settings.destination = $0 })) {
+                        ForEach(TouchpadNotchSettings.Destination.allCases.filter {
+                            !service.settings.usesQuickGestures || ($0 != .previousTrack && $0 != .volumeDown)
+                        }, id: \.self) { action in
+                            Text(service.settings.usesQuickGestures && action == .nextTrack ? "Track skipping (swipe)"
+                                 : service.settings.usesQuickGestures && action == .volumeUp ? "Volume (slide)" : action.title).tag(action)
                         }
                     }
                     if service.settings.destination == .touchpadCI { ciControls }
-                    duration(service.settings.destination.togglesSurface ? "Hold to open" : "Hold to activate", value: $service.settings.openHold)
-                    if service.settings.destination.togglesSurface {
-                        duration("Hold to close", value: $service.settings.closeHold)
-                    } else {
-                        Text("One action per hold. Lift your finger before repeating. Volume changes by one step (6.25%). Media controls target the current player. Mute affects audio output, not your microphone.")
+                    if !service.settings.destination.togglesSurface {
+                        Toggle("Use taps and slides", isOn: Binding(
+                            get: { service.settings.usesQuickGestures },
+                            set: { service.settings.quickGestures = $0 }))
+                        if service.settings.usesQuickGestures {
+                            Text(service.settings.destination == .playPause || service.settings.destination == .mute
+                                 ? "Tap and release your saved spot to activate. Long presses are ignored."
+                                 : service.settings.destination == .nextTrack || service.settings.destination == .previousTrack
+                                 ? "Start at your saved spot. Swipe right for next track, left for previous. Lift to skip again."
+                                 : "Start at your saved spot. Slide up to raise volume, down to lower it. Keep sliding for more steps.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Button("Test selected action") { service.testQuickAction() }
+                        Text("Test runs the action without a touchpad gesture. If it works, check the saved spot and required pressure below. Mute controls audio output.")
                             .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if service.settings.destination.togglesSurface || !service.settings.usesQuickGestures {
+                        duration(service.settings.destination.togglesSurface ? "Hold to open" : "Hold to activate", value: $service.settings.openHold)
+                        if service.settings.destination.togglesSurface {
+                            duration("Hold to close", value: $service.settings.closeHold)
+                        }
                     }
                     LabeledContent("Required pressure") {
                         Slider(value: $service.settings.minimumPressure, in: 0...1, step: 0.05)
                         Text(service.settings.minimumPressure == 0 ? "Any" : "\(Int(service.settings.minimumPressure * 100))%")
                             .monospacedDigit().frame(width: 48)
                     }
+                    Text(service.inputHint).font(.caption).foregroundStyle(.secondary)
                     ProgressView(value: service.pressure ?? 0)
                         .tint((service.pressure ?? 0) >= service.settings.minimumPressure ? .green : .accentColor)
                         .accessibilityLabel("Live touchpad pressure")
